@@ -27,8 +27,15 @@ import {
   runTextWithProviderRouting,
 } from "./ai/router.js";
 import { detectClaudeSession, startClaudeCliLogin } from "./ai/claude-bridge.js";
-import { appConfig, buildDefaultXGlobalArgs, modelCachePath, projectRoot, resolvePordiePaths, resolvePordieScope } from "./config.js";
+import { appConfig, buildDefaultXGlobalArgs, integrationBridgeStatePath, modelCachePath, projectRoot, resolvePordiePaths, resolvePordieScope } from "./config.js";
 import { assessWorkspaceCommand, getWorkspaceSession, listWorkspaceSessions, runWorkspaceCommand } from "./code/workspace.js";
+import { buildIntegrationActionPlan, buildPlannedTrace, executeIntegrationActionPlan } from "./integrations/actions.js";
+import { integrationCatalogSteps, integrationRunbooks } from "./integrations/catalog.js";
+import { buildConfirmPayloadHash, consumeConfirmToken, issueConfirmToken } from "./integrations/confirm-tokens.js";
+import { IntegrationBridge } from "./integrations/bridge.js";
+import { LivekitControlPublisher, type LivekitControlConfig } from "./integrations/livekit-bridge.js";
+import { IntegrationSubscriptionStore } from "./integrations/subscriptions.js";
+import type { IntegrationActionContext } from "./integrations/types.js";
 import { completeOnboarding, getOnboardingState, saveOnboardingState } from "./onboarding.js";
 import { exportPromptOrDieConfig } from "./pordie.js";
 import { importLocalSecrets } from "./secrets/local-import.js";
@@ -38,8 +45,10 @@ import { focusMacApp, listKnownMacApps, openMacApp } from "./skills/mac-actions.
 import type { SkillExecutionInput } from "./skills/types.js";
 import type {
   ApprovalItem,
+  IntegrationActionRequest,
   MacAppId,
   OnboardingState,
+  ProviderMode,
   SkillId,
   TaskRun,
   TaskStatus,
@@ -141,6 +150,29 @@ interface WatchFrameEntry {
 const MAX_WATCH_FRAME_PAYLOAD_CHARS = 1_500_000;
 const MAX_WATCH_FRAME_HISTORY = 180;
 const watchFrameHistory: WatchFrameEntry[] = [];
+const integrationSubscriberStore = new IntegrationSubscriptionStore(integrationBridgeStatePath);
+let integrationBridge: IntegrationBridge | null = null;
+const integrationReadinessState: {
+  hash: string | null;
+  updatedAt: string | null;
+  trigger: string | null;
+} = {
+  hash: null,
+  updatedAt: null,
+  trigger: null,
+};
+const livekitBridgeConfigState: LivekitControlConfig = {
+  enabled: false,
+  configured: false,
+  wsUrl: null,
+  apiKey: null,
+  apiSecret: appConfig.livekit.apiSecret || null,
+  roomPrefix: appConfig.livekit.roomPrefix || "milady-cowork",
+};
+const livekitControlPublisher = new LivekitControlPublisher(() => ({
+  ...livekitBridgeConfigState,
+}));
+integrationBridge = new IntegrationBridge(integrationSubscriberStore, livekitControlPublisher);
 
 const parseLiveEventFilter = (input: {
   watchSessionId?: string | null;
@@ -187,6 +219,17 @@ const matchesLiveEventFilter = (
   return true;
 };
 
+const integrationReadinessTriggers = new Set([
+  "provider_mode_changed",
+  "livekit_config_updated",
+  "mac_policy_updated",
+  "watch_session_started",
+  "watch_session_stopped",
+  "extension_enabled",
+  "extension_disabled",
+  "server_started",
+]);
+
 const emitLiveEvent = (type: string, payload: Record<string, unknown>) => {
   const event = {
     id: randomUUID(),
@@ -225,6 +268,12 @@ const emitLiveEvent = (type: string, payload: Record<string, unknown>) => {
       }
       liveWsClients.delete(client);
     }
+  }
+  if (type.startsWith("integration_")) {
+    void integrationBridge?.emit(event);
+  }
+  if (integrationReadinessTriggers.has(type)) {
+    void emitIntegrationReadinessChanged(type);
   }
 };
 
@@ -1093,6 +1142,155 @@ const resolveLivekitStatus = (onboarding: OnboardingState): ResolvedLivekitStatu
   };
 };
 
+const applyLivekitBridgeConfig = (onboarding: OnboardingState, status: ResolvedLivekitStatus) => {
+  livekitBridgeConfigState.enabled = status.enabled;
+  livekitBridgeConfigState.configured = status.configured && status.streamMode === "events_and_frames";
+  livekitBridgeConfigState.wsUrl = status.wsUrl;
+  livekitBridgeConfigState.apiKey = String(onboarding.livekit.apiKey || appConfig.livekit.apiKey || "").trim() || null;
+  livekitBridgeConfigState.apiSecret = String(appConfig.livekit.apiSecret || "").trim() || null;
+  livekitBridgeConfigState.roomPrefix = status.roomPrefix;
+};
+
+const buildIntegrationStatusPayload = async () => {
+  const onboarding = await getOnboardingState();
+  const provider = await resolveProviderStatusSafely(onboarding);
+  const claudeSession = await detectClaudeSession();
+  const claudeCommand = appConfig.claude.cliCommand || "claude -p";
+  const claudeBinary = resolveCommandBinary(claudeCommand, "claude");
+  const claudeCli = probeExecutable(claudeBinary);
+
+  const codexCommand = process.env.CODEX_CLI_COMMAND || "codex";
+  const codexBinary = resolveCommandBinary(codexCommand, "codex");
+  const codexCli = probeExecutable(codexBinary);
+
+  const livekit = resolveLivekitStatus(onboarding);
+  applyLivekitBridgeConfig(onboarding, livekit);
+  const openrouterSource = onboarding.openrouter.apiKey ? "onboarding" : appConfig.openrouter.apiKey ? "env" : "none";
+  const openrouterConfigured = openrouterSource !== "none";
+
+  const appAllowlist = onboarding.macControl.appAllowlist || [];
+  const allowlistSet = new Set(appAllowlist);
+  const apps = listKnownMacApps().map((app) => ({
+    ...app,
+    allowed: allowlistSet.has(app.id),
+  }));
+  const availableAllowedApps = apps.filter((app) => app.available && app.allowed);
+  const watchSources = listWatchSources();
+  const activeWatchSessions = Array.from(watchSessions.values()).filter((session) => session.active);
+
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  if (!provider.status.claudeSessionDetected && !openrouterConfigured) {
+    blockers.push("No text provider is fully ready (missing Claude session and OpenRouter key).");
+  }
+  if (livekit.enabled && !livekit.configured) {
+    blockers.push(`LiveKit is enabled but not configured: missing ${livekit.missing.join(", ")}.`);
+  }
+  if (!codexCli.available) {
+    warnings.push("Codex CLI is not available in PATH.");
+  }
+  if (!claudeCli.available) {
+    warnings.push(`Claude CLI binary '${claudeBinary}' is not available.`);
+  }
+  if (!claudeSession.detected) {
+    warnings.push("Claude subscription session not detected. Run claude login.");
+  }
+  if (!availableAllowedApps.length) {
+    warnings.push("No mac apps are both available and allowed by policy.");
+  }
+  if (!openrouterConfigured) {
+    warnings.push("OpenRouter key is not configured; non-text modalities will fail.");
+  }
+
+  const bridge = await integrationBridge?.getStatus();
+
+  return {
+    ok: true,
+    integrations: {
+      readiness: {
+        codingAgentReady: Boolean(codexCli.available && (provider.status.claudeSessionDetected || openrouterConfigured)),
+        socialAgentReady: Boolean(onboarding.extensions.x.enabled),
+        watchReady: Boolean(watchSources.some((source) => source.available) && (!livekit.enabled || livekit.configured)),
+        blockers,
+        warnings,
+      },
+      provider: provider.status,
+      claude: {
+        command: claudeCommand,
+        binary: claudeBinary,
+        cliAvailable: claudeCli.available,
+        cliPath: claudeCli.path,
+        sessionDetected: claudeSession.detected,
+        sessionPath: claudeSession.path,
+      },
+      codex: {
+        command: codexCommand,
+        binary: codexBinary,
+        available: codexCli.available,
+        path: codexCli.path,
+      },
+      openrouter: {
+        configured: openrouterConfigured,
+        keySource: openrouterSource,
+      },
+      livekit,
+      mac: {
+        allowlist: appAllowlist,
+        apps,
+        availableAllowedCount: availableAllowedApps.length,
+      },
+      watch: {
+        sources: watchSources,
+        activeCount: activeWatchSessions.length,
+        activeSessions: activeWatchSessions.map((session) => ({
+          id: session.id,
+          sourceId: session.sourceId,
+          taskId: session.taskId || null,
+          transport: session.transport || "local",
+        })),
+      },
+      bridge:
+        bridge || {
+          subscribersTotal: 0,
+          subscribersEnabled: 0,
+          queueDepth: 0,
+          delivered: 0,
+          failed: 0,
+          retriesScheduled: 0,
+          livekit: livekitControlPublisher.getStatus(),
+        },
+      transitions: {
+        readinessHash: integrationReadinessState.hash,
+        lastTransitionAt: integrationReadinessState.updatedAt,
+        lastTrigger: integrationReadinessState.trigger,
+      },
+    },
+    diagnostics: {
+      providerError: provider.error,
+    },
+  };
+};
+
+async function emitIntegrationReadinessChanged(trigger: string) {
+  const status = await buildIntegrationStatusPayload();
+  const readinessHash = createHash("sha1")
+    .update(JSON.stringify(status.integrations.readiness))
+    .digest("hex");
+  if (integrationReadinessState.hash === readinessHash) {
+    return;
+  }
+  const updatedAt = new Date().toISOString();
+  integrationReadinessState.hash = readinessHash;
+  integrationReadinessState.updatedAt = updatedAt;
+  integrationReadinessState.trigger = trigger;
+  emitLiveEvent("integration_readiness_changed", {
+    trigger,
+    readinessHash,
+    updatedAt,
+    readiness: status.integrations.readiness,
+  });
+}
+
 const resolveCommandBinary = (command: string, fallback: string): string => {
   const parts = String(command || "")
     .trim()
@@ -1287,6 +1485,300 @@ const runSkillRequest = async (
     };
   }
   return result;
+};
+
+const buildIntegrationActionContext = async (): Promise<IntegrationActionContext> => {
+  return {
+    ensureMacAllowlist: async (apps: MacAppId[]) => {
+      const onboarding = await getOnboardingState();
+      const merged = Array.from(new Set([...(onboarding.macControl.appAllowlist || []), ...apps]));
+      const next = await saveOnboardingState({
+        macControl: {
+          appAllowlist: merged,
+        },
+      } as Parameters<typeof saveOnboardingState>[0]);
+      emitLiveEvent("mac_policy_updated", {
+        appAllowlist: next.macControl.appAllowlist,
+        requireApprovalFor: next.macControl.requireApprovalFor,
+      });
+      return {
+        ok: true,
+        message: "Mac allowlist updated.",
+        data: {
+          appAllowlist: next.macControl.appAllowlist,
+        },
+        rollbackHint: "Restore prior appAllowlist using POST /api/mac/policy if needed.",
+      };
+    },
+    openMacApp: async (appId: MacAppId, url?: string) => {
+      const onboarding = await getOnboardingState();
+      if (!onboarding.macControl.appAllowlist.includes(appId)) {
+        return {
+          ok: false,
+          code: "app_not_allowed" as const,
+          message: "App is not allowed by current policy.",
+        };
+      }
+      const result = await openMacApp(appId, { url });
+      if (!result.ok) {
+        return {
+          ok: false,
+          code: "execution_failed",
+          message: result.message,
+          rollbackHint: "No rollback needed; app launch is non-persistent.",
+        };
+      }
+      return {
+        ok: true,
+        message: result.message,
+        data: {
+          appId,
+          url: url || null,
+        },
+        rollbackHint: "No rollback needed; app launch is non-persistent.",
+      };
+    },
+    focusMacApp: async (appId: MacAppId) => {
+      const onboarding = await getOnboardingState();
+      if (!onboarding.macControl.appAllowlist.includes(appId)) {
+        return {
+          ok: false,
+          code: "app_not_allowed" as const,
+          message: "App is not allowed by current policy.",
+        };
+      }
+      const result = await focusMacApp(appId);
+      if (!result.ok) {
+        return {
+          ok: false,
+          code: "execution_failed",
+          message: result.message,
+          rollbackHint: "No rollback needed; app focus is non-persistent.",
+        };
+      }
+      return {
+        ok: true,
+        message: result.message,
+        data: {
+          appId,
+        },
+        rollbackHint: "No rollback needed; app focus is non-persistent.",
+      };
+    },
+    setProviderMode: async (mode: ProviderMode) => {
+      const onboarding = await saveOnboardingState({
+        providers: {
+          mode,
+        },
+      } as Parameters<typeof saveOnboardingState>[0]);
+      const status = await resolveProviderStatusSafely(onboarding);
+      emitLiveEvent("provider_mode_changed", {
+        mode,
+        activeRoute: status.status.activeRoute,
+      });
+      return {
+        ok: true,
+        message: "Provider mode updated.",
+        data: {
+          mode,
+          activeRoute: status.status.activeRoute,
+        },
+        rollbackHint: "Set provider mode back through POST /api/providers/mode.",
+      };
+    },
+    checkClaudeSession: async () => {
+      const session = await detectClaudeSession();
+      return {
+        ok: true,
+        message: session.detected ? "Claude session detected." : "Claude session not detected.",
+        data: {
+          detected: session.detected,
+          sessionPath: session.path,
+        },
+      };
+    },
+    setLivekitConfig: async (patch: {
+      enabled?: boolean;
+      wsUrl?: string;
+      apiKey?: string;
+      roomPrefix?: string;
+      streamMode?: "events_only" | "events_and_frames";
+    }) => {
+      const current = await getOnboardingState();
+      const merged: OnboardingState = {
+        ...current,
+        livekit: {
+          ...current.livekit,
+          ...patch,
+        },
+      };
+      const status = resolveLivekitStatus(merged);
+      if (patch.enabled === true && !status.configured) {
+        return {
+          ok: false,
+          code: "execution_failed" as const,
+          message: `Cannot enable LiveKit until configured: missing ${status.missing.join(", ")}.`,
+        };
+      }
+      const next = await saveOnboardingState({
+        livekit: patch,
+      } as Parameters<typeof saveOnboardingState>[0]);
+      const nextStatus = resolveLivekitStatus(next);
+      applyLivekitBridgeConfig(next, nextStatus);
+      emitLiveEvent("livekit_config_updated", {
+        enabled: nextStatus.enabled,
+        configured: nextStatus.configured,
+        mode: nextStatus.mode,
+        streamMode: nextStatus.streamMode,
+        roomPrefix: nextStatus.roomPrefix,
+      });
+      return {
+        ok: true,
+        message: "LiveKit configuration updated.",
+        data: {
+          livekit: nextStatus,
+        },
+        rollbackHint: "Set livekit.enabled=false or restore previous ws/api settings.",
+      };
+    },
+    startWatchSession: async (args: {
+      sourceId: WatchSource["id"];
+      taskId?: string;
+      fps?: number;
+    }) => {
+      const onboarding = await getOnboardingState();
+      if (!onboarding.watch.enabled) {
+        return {
+          ok: false,
+          code: "execution_failed" as const,
+          message: "Watch mode is disabled.",
+        };
+      }
+      const sourceId = normalizeWatchSourceId(args.sourceId || "embedded-browser");
+      if (!sourceId) {
+        return {
+          ok: false,
+          code: "execution_failed" as const,
+          message: "Invalid sourceId.",
+        };
+      }
+      const source = listWatchSources().find((item) => item.id === sourceId);
+      if (!source?.available) {
+        return {
+          ok: false,
+          code: "execution_failed" as const,
+          message: "Requested source is not available on this machine.",
+        };
+      }
+      const fps = normalizeWatchFps(args.fps, onboarding.watch.fps);
+      const livekit = resolveLivekitStatus(onboarding);
+      const session = startWatchSession({
+        sourceId,
+        taskId: args.taskId,
+        fps,
+        livekit,
+      });
+      return {
+        ok: true,
+        message: "Watch session started.",
+        data: {
+          session,
+        },
+        rollbackHint: "Stop the watch session with stop_watch_session step.",
+      };
+    },
+    stopWatchSession: async (sessionId: string) => {
+      const session = watchSessions.get(sessionId);
+      if (!session) {
+        return {
+          ok: false,
+          code: "execution_failed" as const,
+          message: "Watch session not found.",
+        };
+      }
+      stopWatchSession(session.id, "integration_action_stop");
+      return {
+        ok: true,
+        message: "Watch session stopped.",
+        data: {
+          sessionId,
+        },
+      };
+    },
+    mintLivekitViewerToken: async (args: {
+      sessionId?: string;
+      sourceId?: WatchSource["id"];
+      taskId?: string;
+    }) => {
+      const sessionId = String(args.sessionId || "").trim();
+      const sourceId = args.sourceId;
+      const taskId = String(args.taskId || "").trim() || undefined;
+      const session = sessionId ? watchSessions.get(sessionId) : undefined;
+      if (sessionId && !session) {
+        return {
+          ok: false,
+          code: "execution_failed" as const,
+          message: "Watch session not found.",
+        };
+      }
+      const onboarding = await getOnboardingState();
+      const livekit = resolveLivekitStatus(onboarding);
+      if (!livekit.enabled || !livekit.configured || livekit.streamMode !== "events_and_frames") {
+        return {
+          ok: false,
+          code: "execution_failed" as const,
+          message: "LiveKit token mint requires enabled=true, full credentials, and streamMode=events_and_frames.",
+        };
+      }
+      const resolvedSource = session?.sourceId || sourceId || "embedded-browser";
+      const resolvedTaskId = session?.taskId || taskId || undefined;
+      const room = session?.livekitRoom || buildLivekitRoomName(livekit.roomPrefix, resolvedSource, resolvedTaskId);
+      const apiKey = String(onboarding.livekit.apiKey || appConfig.livekit.apiKey || "").trim();
+      const apiSecret = String(appConfig.livekit.apiSecret || "").trim();
+      const wsUrl = normalizeLivekitWsUrl(onboarding.livekit.wsUrl || appConfig.livekit.wsUrl);
+      if (!apiKey || !apiSecret || !wsUrl) {
+        return {
+          ok: false,
+          code: "execution_failed" as const,
+          message: "LiveKit credentials are incomplete. Configure wsUrl, apiKey, and LIVEKIT_API_SECRET.",
+        };
+      }
+      const tokenBundle = mintLivekitAccessToken({
+        apiKey,
+        apiSecret,
+        room,
+        identity: `viewer-${randomUUID().slice(0, 12)}`,
+        participantName: "milady-observer",
+        metadata: {
+          sourceId: resolvedSource,
+          taskId: resolvedTaskId || null,
+          sessionId: session?.id || null,
+        },
+      });
+      return {
+        ok: true,
+        message: "LiveKit viewer token minted.",
+        data: {
+          wsUrl,
+          room,
+          token: tokenBundle.token,
+          expiresAt: tokenBundle.expiresAt,
+          expiresInSeconds: tokenBundle.expiresInSeconds,
+          sessionId: session?.id || null,
+          sourceId: resolvedSource,
+          taskId: resolvedTaskId || null,
+        },
+      };
+    },
+    refreshIntegrationsStatus: async () => {
+      const snapshot = await buildIntegrationStatusPayload();
+      return {
+        ok: true,
+        message: "Integrations status refreshed.",
+        data: snapshot,
+      };
+    },
+  };
 };
 
 const executeTask = async (taskId: string) => {
@@ -2962,6 +3454,7 @@ app.get("/api/cowork/state", async (_req, res) => {
 app.get("/api/livekit/status", async (_req, res) => {
   const onboarding = await getOnboardingState();
   const status = resolveLivekitStatus(onboarding);
+  applyLivekitBridgeConfig(onboarding, status);
   res.json({
     ok: true,
     livekit: status,
@@ -3026,6 +3519,7 @@ app.post("/api/livekit/config", async (req, res) => {
     livekit: patch,
   } as Parameters<typeof saveOnboardingState>[0]);
   const status = resolveLivekitStatus(onboarding);
+  applyLivekitBridgeConfig(onboarding, status);
   emitLiveEvent("livekit_config_updated", {
     enabled: status.enabled,
     configured: status.configured,
@@ -3119,6 +3613,51 @@ app.post("/api/livekit/token", async (req, res) => {
   });
 });
 
+app.post("/api/livekit/token/control", async (_req, res) => {
+  const onboarding = await getOnboardingState();
+  const livekit = resolveLivekitStatus(onboarding);
+  if (!livekit.enabled || !livekit.configured || livekit.streamMode !== "events_and_frames") {
+    res.status(400).json({
+      ok: false,
+      error: "LiveKit control token requires livekit.enabled=true, full credentials, and streamMode=events_and_frames.",
+      livekit,
+    });
+    return;
+  }
+  const apiKey = String(onboarding.livekit.apiKey || appConfig.livekit.apiKey || "").trim();
+  const apiSecret = String(appConfig.livekit.apiSecret || "").trim();
+  const wsUrl = normalizeLivekitWsUrl(onboarding.livekit.wsUrl || appConfig.livekit.wsUrl);
+  if (!apiKey || !apiSecret || !wsUrl) {
+    res.status(400).json({
+      ok: false,
+      error: "LiveKit credentials are incomplete. Configure wsUrl, apiKey, and LIVEKIT_API_SECRET.",
+    });
+    return;
+  }
+  const room = `${livekit.roomPrefix || "milady-cowork"}-control`;
+  const tokenBundle = mintLivekitAccessToken({
+    apiKey,
+    apiSecret,
+    room,
+    identity: `control-viewer-${randomUUID().slice(0, 10)}`,
+    participantName: "integration-control-observer",
+    metadata: {
+      purpose: "integration_control",
+    },
+  });
+  res.json({
+    ok: true,
+    livekit: {
+      wsUrl,
+      room,
+      token: tokenBundle.token,
+      expiresAt: tokenBundle.expiresAt,
+      expiresInSeconds: tokenBundle.expiresInSeconds,
+      purpose: "integration_control",
+    },
+  });
+});
+
 app.post("/api/cowork/quick-action", (req, res) => {
   const action = typeof req.body?.action === "string" ? req.body.action.trim() : "";
   const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
@@ -3207,104 +3746,240 @@ app.get("/api/providers/status", async (_req, res) => {
 });
 
 app.get("/api/integrations/status", async (_req, res) => {
-  const onboarding = await getOnboardingState();
-  const provider = await resolveProviderStatusSafely(onboarding);
-  const claudeSession = await detectClaudeSession();
-  const claudeCommand = appConfig.claude.cliCommand || "claude -p";
-  const claudeBinary = resolveCommandBinary(claudeCommand, "claude");
-  const claudeCli = probeExecutable(claudeBinary);
+  const payload = await buildIntegrationStatusPayload();
+  res.json(payload);
+});
 
-  const codexCommand = process.env.CODEX_CLI_COMMAND || "codex";
-  const codexBinary = resolveCommandBinary(codexCommand, "codex");
-  const codexCli = probeExecutable(codexBinary);
-
-  const livekit = resolveLivekitStatus(onboarding);
-  const openrouterSource = onboarding.openrouter.apiKey ? "onboarding" : appConfig.openrouter.apiKey ? "env" : "none";
-  const openrouterConfigured = openrouterSource !== "none";
-
-  const appAllowlist = onboarding.macControl.appAllowlist || [];
-  const allowlistSet = new Set(appAllowlist);
-  const apps = listKnownMacApps().map((app) => ({
-    ...app,
-    allowed: allowlistSet.has(app.id),
-  }));
-  const availableAllowedApps = apps.filter((app) => app.available && app.allowed);
-  const watchSources = listWatchSources();
-  const activeWatchSessions = Array.from(watchSessions.values()).filter((session) => session.active);
-
-  const blockers: string[] = [];
-  const warnings: string[] = [];
-  if (!provider.status.claudeSessionDetected && !openrouterConfigured) {
-    blockers.push("No text provider is fully ready (missing Claude session and OpenRouter key).");
-  }
-  if (livekit.enabled && !livekit.configured) {
-    blockers.push(`LiveKit is enabled but not configured: missing ${livekit.missing.join(", ")}.`);
-  }
-  if (!codexCli.available) {
-    warnings.push("Codex CLI is not available in PATH.");
-  }
-  if (!claudeCli.available) {
-    warnings.push(`Claude CLI binary '${claudeBinary}' is not available.`);
-  }
-  if (!claudeSession.detected) {
-    warnings.push("Claude subscription session not detected. Run claude login.");
-  }
-  if (!availableAllowedApps.length) {
-    warnings.push("No mac apps are both available and allowed by policy.");
-  }
-  if (!openrouterConfigured) {
-    warnings.push("OpenRouter key is not configured; non-text modalities will fail.");
-  }
-
+app.get("/api/integrations/actions/catalog", (_req, res) => {
   res.json({
     ok: true,
-    integrations: {
-      readiness: {
-        codingAgentReady: Boolean(codexCli.available && (provider.status.claudeSessionDetected || openrouterConfigured)),
-        socialAgentReady: Boolean(onboarding.extensions.x.enabled),
-        watchReady: Boolean(watchSources.some((source) => source.available) && (!livekit.enabled || livekit.configured)),
-        blockers,
-        warnings,
+    actions: integrationRunbooks,
+    steps: integrationCatalogSteps,
+  });
+});
+
+app.post("/api/integrations/actions", async (req, res) => {
+  const body = (req.body || {}) as Partial<IntegrationActionRequest>;
+  const mode = body.mode === "execute" ? "execute" : body.mode === "dry_run" ? "dry_run" : null;
+  if (!mode) {
+    res.status(400).json({
+      ok: false,
+      code: "invalid_action",
+      error: "mode must be dry_run or execute.",
+    });
+    return;
+  }
+  const planned = buildIntegrationActionPlan({
+    actionId: typeof body.actionId === "string" ? body.actionId : undefined,
+    steps: Array.isArray(body.steps) ? body.steps : undefined,
+    params: body.params && typeof body.params === "object" ? (body.params as Record<string, unknown>) : undefined,
+  });
+  if (!planned.ok) {
+    res.status(400).json({
+      ok: false,
+      code: planned.code,
+      error: planned.error,
+    });
+    return;
+  }
+  const payloadHash = buildConfirmPayloadHash({
+    actionId: planned.plan.actionId || null,
+    steps: planned.plan.steps,
+    params: planned.plan.params,
+  });
+  const plannedTrace = buildPlannedTrace(planned.plan.steps);
+  if (mode === "dry_run") {
+    const confirm = issueConfirmToken(payloadHash);
+    emitLiveEvent("integration_action_planned", {
+      actionId: planned.plan.actionId || null,
+      steps: planned.plan.steps.map((step) => step.id),
+      confirmTokenExpiresAt: confirm.expiresAt,
+    });
+    res.json({
+      ok: true,
+      mode,
+      actionId: planned.plan.actionId || null,
+      trace: plannedTrace,
+      confirmToken: confirm.token,
+      confirmTokenExpiresAt: confirm.expiresAt,
+    });
+    return;
+  }
+
+  const tokenCheck = consumeConfirmToken(String(body.confirmToken || ""), payloadHash);
+  if (!tokenCheck.ok) {
+    res.status(409).json({
+      ok: false,
+      mode,
+      actionId: planned.plan.actionId || null,
+      code: "confirm_required",
+      error: `A valid confirmToken from dry_run is required (${tokenCheck.code}).`,
+      trace: plannedTrace,
+    });
+    return;
+  }
+
+  emitLiveEvent("integration_action_started", {
+    actionId: planned.plan.actionId || null,
+    steps: planned.plan.steps.map((step) => step.id),
+  });
+
+  const context = await buildIntegrationActionContext();
+  const result = await executeIntegrationActionPlan({
+    context,
+    steps: planned.plan.steps,
+    params: planned.plan.params,
+  });
+  for (const step of result.trace) {
+    emitLiveEvent("integration_action_step", {
+      actionId: planned.plan.actionId || null,
+      stepId: step.stepId,
+      status: step.status,
+      code: step.code || null,
+      message: step.message || null,
+      index: step.index,
+    });
+  }
+  if (!result.ok) {
+    emitLiveEvent("integration_action_failed", {
+      actionId: planned.plan.actionId || null,
+      code: result.code || "execution_failed",
+      error: result.error || "integration action failed",
+      trace: result.trace,
+    });
+    const statusCode = result.code === "approval_required" ? 409 : result.code === "app_not_allowed" ? 403 : 400;
+    res.status(statusCode).json({
+      ok: false,
+      mode,
+      actionId: planned.plan.actionId || null,
+      code: result.code || "execution_failed",
+      error: result.error || "integration action failed",
+      trace: result.trace,
+    });
+    return;
+  }
+
+  emitLiveEvent("integration_action_completed", {
+    actionId: planned.plan.actionId || null,
+    trace: result.trace,
+  });
+  void emitIntegrationReadinessChanged("integration_action_completed");
+  res.json({
+    ok: true,
+    mode,
+    actionId: planned.plan.actionId || null,
+    trace: result.trace,
+  });
+});
+
+app.get("/api/integrations/subscriptions", async (_req, res) => {
+  const subscribers = await integrationBridge?.listSubscribers();
+  res.json({
+    ok: true,
+    subscriptions: subscribers || [],
+  });
+});
+
+app.post("/api/integrations/subscriptions", async (req, res) => {
+  const url = typeof req.body?.url === "string" ? req.body.url.trim() : "";
+  const events = Array.isArray(req.body?.events)
+    ? req.body.events.filter((entry: unknown): entry is string => typeof entry === "string").map((entry: string) => entry.trim()).filter(Boolean)
+    : undefined;
+  if (!url) {
+    res.status(400).json({ ok: false, error: "url is required." });
+    return;
+  }
+  try {
+    const created = await integrationBridge?.createSubscriber({
+      url,
+      events,
+    });
+    emitLiveEvent("integration_subscription_created", {
+      url,
+    });
+    res.status(201).json({
+      ok: true,
+      subscriber: created?.subscriber || null,
+      secret: created?.secret || null,
+    });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.post("/api/integrations/subscriptions/:id/enable", async (req, res) => {
+  const id = String(req.params.id || "").trim();
+  const subscriber = await integrationBridge?.setSubscriberEnabled(id, true);
+  if (!subscriber) {
+    res.status(404).json({ ok: false, error: "Subscriber not found." });
+    return;
+  }
+  emitLiveEvent("integration_subscription_enabled", { id });
+  res.json({
+    ok: true,
+    subscriber,
+  });
+});
+
+app.post("/api/integrations/subscriptions/:id/disable", async (req, res) => {
+  const id = String(req.params.id || "").trim();
+  const subscriber = await integrationBridge?.setSubscriberEnabled(id, false);
+  if (!subscriber) {
+    res.status(404).json({ ok: false, error: "Subscriber not found." });
+    return;
+  }
+  emitLiveEvent("integration_subscription_disabled", { id });
+  res.json({
+    ok: true,
+    subscriber,
+  });
+});
+
+app.post("/api/integrations/subscriptions/:id/test", async (req, res) => {
+  const id = String(req.params.id || "").trim();
+  const queued = await integrationBridge?.testSubscriber(id);
+  if (!queued) {
+    res.status(404).json({ ok: false, error: "Subscriber not found." });
+    return;
+  }
+  res.json({
+    ok: true,
+    queued: true,
+    id,
+  });
+});
+
+app.delete("/api/integrations/subscriptions/:id", async (req, res) => {
+  const id = String(req.params.id || "").trim();
+  const removed = await integrationBridge?.deleteSubscriber(id);
+  if (!removed) {
+    res.status(404).json({ ok: false, error: "Subscriber not found." });
+    return;
+  }
+  emitLiveEvent("integration_subscription_deleted", { id });
+  res.json({
+    ok: true,
+    id,
+  });
+});
+
+app.get("/api/integrations/bridge/status", async (_req, res) => {
+  const status = await integrationBridge?.getStatus();
+  res.json({
+    ok: true,
+    bridge:
+      status || {
+        subscribersTotal: 0,
+        subscribersEnabled: 0,
+        queueDepth: 0,
+        delivered: 0,
+        failed: 0,
+        retriesScheduled: 0,
+        livekit: livekitControlPublisher.getStatus(),
       },
-      provider: provider.status,
-      claude: {
-        command: claudeCommand,
-        binary: claudeBinary,
-        cliAvailable: claudeCli.available,
-        cliPath: claudeCli.path,
-        sessionDetected: claudeSession.detected,
-        sessionPath: claudeSession.path,
-      },
-      codex: {
-        command: codexCommand,
-        binary: codexBinary,
-        available: codexCli.available,
-        path: codexCli.path,
-      },
-      openrouter: {
-        configured: openrouterConfigured,
-        keySource: openrouterSource,
-      },
-      livekit,
-      mac: {
-        allowlist: appAllowlist,
-        apps,
-        availableAllowedCount: availableAllowedApps.length,
-      },
-      watch: {
-        sources: watchSources,
-        activeCount: activeWatchSessions.length,
-        activeSessions: activeWatchSessions.map((session) => ({
-          id: session.id,
-          sourceId: session.sourceId,
-          taskId: session.taskId || null,
-          transport: session.transport || "local",
-        })),
-      },
-    },
-    diagnostics: {
-      providerError: provider.error,
-    },
   });
 });
 
@@ -5100,6 +5775,7 @@ const handleWebSocketUpgrade = (request: { url?: string; headers: Record<string,
 const server = app.listen(appConfig.port, () => {
   // eslint-disable-next-line no-console
   console.log(`Prompt or Die Social Suite listening on http://localhost:${appConfig.port}`);
+  void integrationBridge?.ensureReady();
   emitLiveEvent("server_started", {
     port: appConfig.port,
   });

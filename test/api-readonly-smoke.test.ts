@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,8 @@ const baseUrl = `http://127.0.0.1:${port}`;
 
 let server: ReturnType<typeof spawn> | null = null;
 let serverLogs = "";
+
+setDefaultTimeout(45_000);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -105,6 +107,9 @@ describe("api read-only smoke", () => {
   it("serves provider, extension, skills, and autonomy control planes", async () => {
     const provider = await apiGet("/api/providers/status");
     const integrations = await apiGet("/api/integrations/status");
+    const integrationCatalog = await apiGet("/api/integrations/actions/catalog");
+    const integrationSubscribers = await apiGet("/api/integrations/subscriptions");
+    const integrationBridge = await apiGet("/api/integrations/bridge/status");
     const extensions = await apiGet("/api/extensions");
     const skills = await apiGet("/api/skills");
     const autonomy = await apiGet("/api/agent/autonomy");
@@ -113,6 +118,9 @@ describe("api read-only smoke", () => {
 
     expect(provider.status).toBe(200);
     expect(integrations.status).toBe(200);
+    expect(integrationCatalog.status).toBe(200);
+    expect(integrationSubscribers.status).toBe(200);
+    expect(integrationBridge.status).toBe(200);
     expect(extensions.status).toBe(200);
     expect(skills.status).toBe(200);
     expect(autonomy.status).toBe(200);
@@ -122,6 +130,9 @@ describe("api read-only smoke", () => {
     expect((provider.body as Record<string, unknown>).ok).toBe(true);
     expect((integrations.body as Record<string, unknown>).ok).toBe(true);
     expect(typeof (integrations.body as Record<string, unknown>).integrations).toBe("object");
+    expect(Array.isArray((integrationCatalog.body as Record<string, unknown>).actions)).toBe(true);
+    expect(Array.isArray((integrationSubscribers.body as Record<string, unknown>).subscriptions)).toBe(true);
+    expect(typeof (integrationBridge.body as Record<string, unknown>).bridge).toBe("object");
     expect((extensions.body as Record<string, unknown>).ok).toBe(true);
     expect(Array.isArray((skills.body as Record<string, unknown>).skills)).toBe(true);
     expect((autonomy.body as Record<string, unknown>).ok).toBe(true);
@@ -136,6 +147,7 @@ describe("api read-only smoke", () => {
     const liveSnapshotFiltered = await apiGet("/api/live/snapshot?sessionId=demo-session&sourceId=embedded-browser");
     const watchLatestFrame = await apiGet("/api/watch/frame/latest");
     const livekit = await apiGet("/api/livekit/status");
+    const livekitControlToken = await apiPost("/api/livekit/token/control", {});
     const livekitTokenInvalidSource = await apiPost("/api/livekit/token", { sourceId: "invalid-source" });
     const codeStatus = await apiGet("/api/code/status");
     const wsUpgrade = await apiGet("/api/live/ws");
@@ -146,6 +158,7 @@ describe("api read-only smoke", () => {
     expect(liveSnapshotFiltered.status).toBe(200);
     expect(watchLatestFrame.status).toBe(200);
     expect(livekit.status).toBe(200);
+    expect([200, 400]).toContain(livekitControlToken.status);
     expect(livekitTokenInvalidSource.status).toBe(400);
     expect(codeStatus.status).toBe(200);
     expect(wsUpgrade.status).toBe(426);
@@ -156,6 +169,7 @@ describe("api read-only smoke", () => {
     expect(Array.isArray((liveSnapshotFiltered.body as Record<string, unknown>).events)).toBe(true);
     expect((watchLatestFrame.body as Record<string, unknown>).ok).toBe(true);
     expect((livekit.body as Record<string, unknown>).ok).toBe(true);
+    expect(typeof (livekitControlToken.body as Record<string, unknown>).ok).toBe("boolean");
     expect((livekitTokenInvalidSource.body as Record<string, unknown>).ok).toBe(false);
     expect((codeStatus.body as Record<string, unknown>).ok).toBe(true);
     expect((wsUpgrade.body as Record<string, unknown>).ok).toBe(false);

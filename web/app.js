@@ -26,6 +26,9 @@ const state = {
   watchSources: [],
   livekitStatus: null,
   integrations: null,
+  integrationActionCatalog: [],
+  integrationSubscribers: [],
+  integrationBridgeStatus: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -274,7 +277,141 @@ const refreshProviderStatus = async () => {
 const refreshIntegrations = async () => {
   const result = await apiGet("/api/integrations/status");
   state.integrations = result?.integrations || null;
+  renderIntegrationBadges();
   setText("integrations-output", result);
+  return result;
+};
+
+const renderIntegrationBadges = () => {
+  const node = $("integration-badges");
+  if (!node) {
+    return;
+  }
+  const readiness = state.integrations?.readiness || {};
+  const rows = [
+    {
+      label: "coding-agent",
+      value: Boolean(readiness.codingAgentReady),
+      text: readiness.codingAgentReady ? "ready" : "blocked",
+    },
+    {
+      label: "social-agent",
+      value: Boolean(readiness.socialAgentReady),
+      text: readiness.socialAgentReady ? "ready" : "blocked",
+    },
+    {
+      label: "watch",
+      value: Boolean(readiness.watchReady),
+      text: readiness.watchReady ? "ready" : "blocked",
+    },
+    {
+      label: "claude-session",
+      value: Boolean(state.integrations?.claude?.sessionDetected),
+      text: state.integrations?.claude?.sessionDetected ? "detected" : "missing",
+    },
+    {
+      label: "codex",
+      value: Boolean(state.integrations?.codex?.available),
+      text: state.integrations?.codex?.available ? "available" : "missing",
+    },
+    {
+      label: "livekit",
+      value: Boolean(state.integrations?.livekit?.configured),
+      text: state.integrations?.livekit?.configured ? "configured" : "needs config",
+    },
+  ];
+  node.innerHTML = "";
+  rows.forEach((row) => {
+    const badge = document.createElement("div");
+    badge.className = `integration-badge ${row.value ? "ready" : "blocked"}`;
+    badge.innerHTML = `<strong>${row.label}</strong><span>${row.text}</span>`;
+    node.appendChild(badge);
+  });
+};
+
+const refreshIntegrationActionCatalog = async () => {
+  const result = await apiGet("/api/integrations/actions/catalog");
+  state.integrationActionCatalog = Array.isArray(result?.actions) ? result.actions : [];
+  const select = $("integration-runbook-select");
+  if (select) {
+    const current = select.value;
+    select.innerHTML = "";
+    state.integrationActionCatalog.forEach((runbook) => {
+      const option = document.createElement("option");
+      option.value = runbook.id;
+      option.textContent = `${runbook.title} (${runbook.id})`;
+      select.appendChild(option);
+    });
+    if (current && state.integrationActionCatalog.some((runbook) => runbook.id === current)) {
+      select.value = current;
+    }
+  }
+  setText("integration-action-output", result);
+  return result;
+};
+
+const refreshIntegrationSubscribers = async () => {
+  const result = await apiGet("/api/integrations/subscriptions");
+  state.integrationSubscribers = Array.isArray(result?.subscriptions) ? result.subscriptions : [];
+  setText("integration-subs-output", result);
+  return result;
+};
+
+const refreshIntegrationBridgeStatus = async () => {
+  const result = await apiGet("/api/integrations/bridge/status");
+  state.integrationBridgeStatus = result?.bridge || null;
+  setText("integration-bridge-output", result);
+  return result;
+};
+
+const parseJsonField = (id, fallback = {}) => {
+  const raw = ($(id)?.value || "").trim();
+  if (!raw) {
+    return fallback;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return fallback;
+    }
+    return parsed;
+  } catch {
+    throw new Error(`${id} must be valid JSON object.`);
+  }
+};
+
+const runIntegrationActionFlow = async (mode) => {
+  const actionId = ($("integration-runbook-select")?.value || "").trim();
+  if (!actionId) {
+    throw new Error("Select an integration runbook.");
+  }
+  const params = parseJsonField("integration-params-json", {});
+  if (mode === "dry_run") {
+    const result = await apiPost("/api/integrations/actions", {
+      mode: "dry_run",
+      actionId,
+      params,
+    });
+    if ($("integration-confirm-token")) {
+      $("integration-confirm-token").value = result?.confirmToken || "";
+    }
+    setText("integration-action-output", result);
+    await refreshIntegrations();
+    await refreshIntegrationBridgeStatus();
+    return result;
+  }
+  const confirmToken = ($("integration-confirm-token")?.value || "").trim();
+  const result = await apiPost("/api/integrations/actions", {
+    mode: "execute",
+    actionId,
+    params,
+    confirmToken,
+  });
+  setText("integration-action-output", result);
+  await refreshIntegrations();
+  await refreshMacApps();
+  await refreshCoworkState();
+  await refreshIntegrationBridgeStatus();
   return result;
 };
 
@@ -2171,6 +2308,148 @@ const bindDashboardEvents = () => {
     }
   });
 
+  $("integration-actions-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshIntegrationActionCatalog();
+    } catch (error) {
+      setText("integration-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-action-dry-run")?.addEventListener("click", async () => {
+    try {
+      await runIntegrationActionFlow("dry_run");
+    } catch (error) {
+      setText("integration-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-action-execute")?.addEventListener("click", async () => {
+    try {
+      await runIntegrationActionFlow("execute");
+    } catch (error) {
+      setText("integration-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-subs-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshIntegrationSubscribers();
+      await refreshIntegrationBridgeStatus();
+    } catch (error) {
+      setText("integration-subs-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-sub-create")?.addEventListener("click", async () => {
+    const url = ($("integration-sub-url")?.value || "").trim();
+    const events = String($("integration-sub-events")?.value || "")
+      .split(/,|\r?\n/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    try {
+      const result = await apiPost("/api/integrations/subscriptions", {
+        url,
+        events,
+      });
+      setText("integration-subs-output", result);
+      if ($("integration-sub-id") && result?.subscriber?.id) {
+        $("integration-sub-id").value = result.subscriber.id;
+      }
+      await refreshIntegrationSubscribers();
+      await refreshIntegrationBridgeStatus();
+    } catch (error) {
+      setText("integration-subs-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-sub-enable")?.addEventListener("click", async () => {
+    const id = ($("integration-sub-id")?.value || "").trim();
+    if (!id) {
+      setText("integration-subs-output", "Subscriber ID is required.");
+      return;
+    }
+    try {
+      const result = await apiPost(`/api/integrations/subscriptions/${encodeURIComponent(id)}/enable`, {});
+      setText("integration-subs-output", result);
+      await refreshIntegrationSubscribers();
+      await refreshIntegrationBridgeStatus();
+    } catch (error) {
+      setText("integration-subs-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-sub-disable")?.addEventListener("click", async () => {
+    const id = ($("integration-sub-id")?.value || "").trim();
+    if (!id) {
+      setText("integration-subs-output", "Subscriber ID is required.");
+      return;
+    }
+    try {
+      const result = await apiPost(`/api/integrations/subscriptions/${encodeURIComponent(id)}/disable`, {});
+      setText("integration-subs-output", result);
+      await refreshIntegrationSubscribers();
+      await refreshIntegrationBridgeStatus();
+    } catch (error) {
+      setText("integration-subs-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-sub-test")?.addEventListener("click", async () => {
+    const id = ($("integration-sub-id")?.value || "").trim();
+    if (!id) {
+      setText("integration-subs-output", "Subscriber ID is required.");
+      return;
+    }
+    try {
+      const result = await apiPost(`/api/integrations/subscriptions/${encodeURIComponent(id)}/test`, {});
+      setText("integration-subs-output", result);
+      await refreshIntegrationBridgeStatus();
+    } catch (error) {
+      setText("integration-subs-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-sub-delete")?.addEventListener("click", async () => {
+    const id = ($("integration-sub-id")?.value || "").trim();
+    if (!id) {
+      setText("integration-subs-output", "Subscriber ID is required.");
+      return;
+    }
+    try {
+      const response = await fetch(`/api/integrations/subscriptions/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      const text = await response.text();
+      const parsed = parseMaybeJSON(text || "{}");
+      if (!response.ok) {
+        throw new Error(toJSON(parsed));
+      }
+      setText("integration-subs-output", parsed);
+      await refreshIntegrationSubscribers();
+      await refreshIntegrationBridgeStatus();
+    } catch (error) {
+      setText("integration-subs-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-bridge-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshIntegrationBridgeStatus();
+    } catch (error) {
+      setText("integration-bridge-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-control-token")?.addEventListener("click", async () => {
+    try {
+      const result = await apiPost("/api/livekit/token/control", {});
+      setText("integration-bridge-output", result);
+    } catch (error) {
+      setText("integration-bridge-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
   $("ext-refresh")?.addEventListener("click", async () => {
     try {
       await refreshExtensions();
@@ -3147,6 +3426,9 @@ const boot = async () => {
   await refreshMacApps();
   await refreshLivekitStatus();
   await refreshIntegrations();
+  await refreshIntegrationActionCatalog();
+  await refreshIntegrationSubscribers();
+  await refreshIntegrationBridgeStatus();
   await refreshTaskLogTail();
   renderWatchObserverMeta();
   const initialWatchSession = resolveActiveWatchSession();
@@ -3155,7 +3437,14 @@ const boot = async () => {
   }
   setInterval(async () => {
     try {
-      await Promise.all([refreshTasks(), refreshApprovals(), refreshCoworkState(), refreshTaskLogTail()]);
+      await Promise.all([
+        refreshTasks(),
+        refreshApprovals(),
+        refreshCoworkState(),
+        refreshTaskLogTail(),
+        refreshIntegrations(),
+        refreshIntegrationBridgeStatus(),
+      ]);
     } catch {
       // keep dashboard responsive even if one refresh cycle fails
     }

@@ -8,6 +8,7 @@
     "dev": "tsx src/server.ts",
     "lint": "bunx tsc --noEmit",
     "test": "bun test",
+    "test:once": "bun test",
     "smoke:api": "bash scripts/smoke-endpoints.sh",
     "verify": "bunx tsc --noEmit && bun test && bun run smoke:api",
     "tui": "tsx src/tui.ts",
@@ -22,6 +23,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
+    "livekit-server-sdk": "^2.13.2",
     "prompts": "^2.4.2",
     "zod": "^4.1.5"
   },

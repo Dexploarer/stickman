@@ -80,6 +80,43 @@ html {
   background: var(--chip-bg);
 }
 
+.integration-badges {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.integration-badge {
+  border: 1px solid rgba(15, 36, 41, 0.14);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 7px 8px;
+  display: grid;
+  gap: 2px;
+}
+
+.integration-badge strong {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.integration-badge span {
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.integration-badge.ready {
+  border-color: rgba(47, 143, 92, 0.35);
+  background: rgba(47, 143, 92, 0.1);
+}
+
+.integration-badge.blocked {
+  border-color: rgba(177, 56, 56, 0.35);
+  background: rgba(177, 56, 56, 0.1);
+}
+
 .layout {
   display: grid;
   grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
@@ -518,6 +555,9 @@ pre {
     grid-template-columns: 1fr;
   }
   .cowork-quick-grid {
+    grid-template-columns: 1fr;
+  }
+  .integration-badges {
     grid-template-columns: 1fr;
   }
 }

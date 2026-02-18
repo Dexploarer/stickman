@@ -50,6 +50,19 @@ if [ ! -f .state/openrouter-models-cache.json ]; then
   echo "{}" > .state/openrouter-models-cache.json
 fi
 
+if [ ! -f .state/integration-bridge.json ]; then
+  cat > .state/integration-bridge.json <<'EOF'
+{
+  "subscribers": [],
+  "stats": {
+    "delivered": 0,
+    "failed": 0,
+    "retriesScheduled": 0
+  }
+}
+EOF
+fi
+
 if [ ! -f .pordie/config.json ]; then
   echo "{}" > .pordie/config.json
 fi
@@ -78,6 +91,14 @@ if [ -z "${OPENROUTER_API_KEY:-}" ]; then
   else
     warn "OPENROUTER_API_KEY not set. Image/video/embedding/voice features require OpenRouter."
   fi
+fi
+
+if [ -n "${LIVEKIT_WS_URL:-}" ] && [ -z "${LIVEKIT_API_SECRET:-}" ]; then
+  warn "LIVEKIT_WS_URL is set but LIVEKIT_API_SECRET is not. LiveKit control-room bridge will stay disabled."
+fi
+
+if [ -z "${X_NOTIFY_WEBHOOK:-}" ] && [ -f ".env" ] && ! grep -qE '^X_NOTIFY_WEBHOOK=[^[:space:]]+' .env; then
+  warn "X_NOTIFY_WEBHOOK not set. External webhook notifications are optional but currently disabled."
 fi
 
 if ! command -v codex >/dev/null 2>&1; then

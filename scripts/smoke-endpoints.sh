@@ -80,6 +80,10 @@ fi
 req health GET /api/health 200
 req providers_status GET /api/providers/status 200
 req integrations_status GET /api/integrations/status 200
+req integrations_actions_catalog GET /api/integrations/actions/catalog 200
+req integrations_action_dry_run POST /api/integrations/actions 200 '{"mode":"dry_run","actionId":"prepare_observer_workspace"}'
+req integrations_action_execute_missing_token POST /api/integrations/actions 409 '{"mode":"execute","actionId":"prepare_observer_workspace"}'
+req integrations_subscriptions_list GET /api/integrations/subscriptions 200
 req providers_mode_invalid POST /api/providers/mode 400 '{"mode":"invalid"}'
 req providers_mode_hybrid POST /api/providers/mode 200 '{"mode":"hybrid"}'
 req cowork_state_initial GET /api/cowork/state 200
@@ -123,9 +127,11 @@ req mac_focus_denied POST /api/mac/apps/focus 403 '{"appId":"unknown"}'
 req watch_sources GET /api/watch/sources 200
 req watch_frame_latest GET /api/watch/frame/latest 200
 req livekit_status GET /api/livekit/status 200
+req livekit_control_token_expected_fail POST /api/livekit/token/control 400 '{}'
 req livekit_token_invalid_source POST /api/livekit/token 400 '{"sourceId":"invalid-source"}'
 req livekit_config_invalid_prefix POST /api/livekit/config 400 '{"roomPrefix":"invalid prefix!"}'
 req livekit_config POST /api/livekit/config 200 '{"enabled":false,"streamMode":"events_only","roomPrefix":"milady-cowork"}'
+req integrations_bridge_status GET /api/integrations/bridge/status 200
 req watch_start_invalid POST /api/watch/start 400 '{"sourceId":"invalid-source"}'
 req watch_start_valid POST /api/watch/start 200 '{"sourceId":"embedded-browser","fps":2}'
 
@@ -140,6 +146,18 @@ fi
 
 req live_ws_upgrade GET /api/live/ws 426
 req code_status GET /api/code/status 200
+
+req integrations_subscriber_create POST /api/integrations/subscriptions 201 '{"url":"https://example.com/hooks/stickman","events":["integration_*"]}'
+SUB_ID=$(SMOKE_LAST_RESP="$SMOKE_LAST_RESP" node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync(process.env.SMOKE_LAST_RESP || "/tmp/mss_smoke_last_resp.json","utf8")); process.stdout.write(x.subscriber?.id || "")')
+if [ -n "$SUB_ID" ]; then
+  req integrations_subscriber_disable POST "/api/integrations/subscriptions/${SUB_ID}/disable" 200 '{}'
+  req integrations_subscriber_enable POST "/api/integrations/subscriptions/${SUB_ID}/enable" 200 '{}'
+  req integrations_subscriber_test POST "/api/integrations/subscriptions/${SUB_ID}/test" 200 '{}'
+  req integrations_subscriber_delete DELETE "/api/integrations/subscriptions/${SUB_ID}" 200
+else
+  echo "FAIL integrations_subscriber_parse [missing subscriber id]"
+  FAIL=$((FAIL + 1))
+fi
 
 echo "SMOKE_SUMMARY pass=${PASS} fail=${FAIL}"
 if [ "$FAIL" -ne 0 ]; then

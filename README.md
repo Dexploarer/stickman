@@ -73,11 +73,14 @@ scripts/new-worktree-bootstrap.sh feature/branch-name /path/to/new/worktree
 - `Antigravity app not found`: install Antigravity if you want `antigravity.open` skills enabled.
 - `Google Chrome.app not found`: install Chrome if you want external browser handoff enabled.
 - `OPENROUTER_API_KEY not set`: text fallback may still work in Claude mode, but image/video/embedding/voice require OpenRouter.
+- `LIVEKIT_WS_URL set without LIVEKIT_API_SECRET`: LiveKit control-room bridge will remain disabled.
+- `X_NOTIFY_WEBHOOK not set`: outbound integration webhook fanout is optional and currently disabled.
 
 Setup now also guarantees per-worktree local state scaffolding:
 
 - `./.state/onboarding.json`
 - `./.state/openrouter-models-cache.json`
+- `./.state/integration-bridge.json`
 - `./.pordie/config.json`
 - `./.pordie/env.sh`
 
@@ -232,7 +235,17 @@ This creates and launches:
 - `GET /api/livekit/status`
 - `POST /api/livekit/config`
 - `POST /api/livekit/token`
+- `POST /api/livekit/token/control`
 - `GET /api/integrations/status`
+- `GET /api/integrations/actions/catalog`
+- `POST /api/integrations/actions`
+- `GET /api/integrations/subscriptions`
+- `POST /api/integrations/subscriptions`
+- `POST /api/integrations/subscriptions/:id/enable`
+- `POST /api/integrations/subscriptions/:id/disable`
+- `POST /api/integrations/subscriptions/:id/test`
+- `DELETE /api/integrations/subscriptions/:id`
+- `GET /api/integrations/bridge/status`
 - `GET /api/code/status`
 - `POST /api/code/plan`
 - `POST /api/code/exec`
@@ -250,6 +263,16 @@ This creates and launches:
 - `POST /api/onboarding/save`
 - `POST /api/onboarding/complete`
 - `POST /api/onboarding/export-env`
+
+## Integration Bridge Delivery
+
+- Bridge fanout publishes `integration_*` events to registered webhooks and LiveKit control room when configured.
+- Signed webhook header: `x-stickman-signature: sha256=<hex>` computed from raw JSON body with subscriber secret.
+- Delivery metadata headers:
+- `x-stickman-event-id`
+- `x-stickman-event-type`
+- `x-stickman-attempt`
+- Retry schedule: `1s`, `3s`, `9s` (max 3 attempts total).
 - `POST /api/onboarding/import-local-secrets`
 - `POST /api/onboarding/test-x-login`
 - `POST /api/persona/derive`

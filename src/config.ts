@@ -11,6 +11,7 @@ export const stateDir = path.resolve(projectRoot, ".state");
 export const onboardingStatePath = path.resolve(stateDir, "onboarding.json");
 export const modelCachePath = path.resolve(stateDir, "openrouter-models-cache.json");
 export const workflowStorePath = path.resolve(stateDir, "workflows.json");
+export const integrationBridgeStatePath = path.resolve(stateDir, "integration-bridge.json");
 export const homePordieDir = path.resolve(os.homedir(), ".pordie");
 export const projectPordieDir = path.resolve(projectRoot, ".pordie");
 

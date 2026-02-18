@@ -20,6 +20,24 @@ export type SkillId =
   | "x-social.run_endpoint"
   | "code-workspace.exec";
 export type TaskStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+export type IntegrationActionMode = "dry_run" | "execute";
+export type IntegrationActionId =
+  | "prepare_observer_workspace"
+  | "launch_watch_surface"
+  | "repair_provider_route"
+  | "recover_livekit_bridge";
+export type IntegrationStepId =
+  | "ensure_mac_allowlist"
+  | "open_mac_app"
+  | "focus_mac_app"
+  | "set_provider_mode"
+  | "check_claude_session"
+  | "set_livekit_config"
+  | "start_watch_session"
+  | "stop_watch_session"
+  | "mint_livekit_viewer_token"
+  | "refresh_integrations_status";
+export type IntegrationStepStatus = "planned" | "skipped" | "executed" | "failed" | "approval_required";
 
 export type XArgValue =
   | string
@@ -260,6 +278,82 @@ export interface WatchSession {
   fps: number;
   lastFrameAt?: string;
   frameCount: number;
+}
+
+export interface IntegrationStepRequest {
+  id: IntegrationStepId;
+  args?: Record<string, unknown>;
+}
+
+export interface IntegrationActionRequest {
+  mode: IntegrationActionMode;
+  actionId?: IntegrationActionId;
+  steps?: IntegrationStepRequest[];
+  params?: Record<string, unknown>;
+  confirmToken?: string;
+}
+
+export interface IntegrationActionTraceStep {
+  index: number;
+  stepId: IntegrationStepId;
+  status: IntegrationStepStatus;
+  args: Record<string, unknown>;
+  startedAt?: string;
+  endedAt?: string;
+  message?: string;
+  code?: string;
+  data?: Record<string, unknown>;
+  rollbackHint?: string;
+  approvalIds?: string[];
+}
+
+export interface IntegrationActionResponse {
+  ok: boolean;
+  mode: IntegrationActionMode;
+  actionId?: IntegrationActionId;
+  trace: IntegrationActionTraceStep[];
+  confirmToken?: string;
+  confirmTokenExpiresAt?: string;
+  code?: "confirm_required" | "invalid_action" | "approval_required" | "app_not_allowed" | "execution_failed";
+  error?: string;
+}
+
+export interface IntegrationConfirmTokenRecord {
+  token: string;
+  payloadHash: string;
+  issuedAt: string;
+  expiresAt: string;
+  consumedAt?: string;
+}
+
+export interface IntegrationSubscriber {
+  id: string;
+  url: string;
+  enabled: boolean;
+  events: string[];
+  secret: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+}
+
+export interface IntegrationBridgeStatus {
+  subscribersTotal: number;
+  subscribersEnabled: number;
+  queueDepth: number;
+  delivered: number;
+  failed: number;
+  retriesScheduled: number;
+  lastDeliveryAt?: string;
+  lastEventAt?: string;
+  livekit: {
+    enabled: boolean;
+    configured: boolean;
+    room: string;
+    publisherReady: boolean;
+    lastPublishError?: string;
+  };
 }
 
 export interface OpenRouterModelRecord {

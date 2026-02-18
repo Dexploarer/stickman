@@ -360,7 +360,43 @@
               <button class="ghost" type="button" id="integration-open-chrome">Open Chrome</button>
               <button class="ghost" type="button" id="integration-claude-login">Claude Login Handoff</button>
             </div>
+            <div id="integration-badges" class="integration-badges"></div>
             <pre id="integrations-output"></pre>
+            <h3>Integration Actions</h3>
+            <label>Runbook</label>
+            <select id="integration-runbook-select"></select>
+            <label>Action params (JSON)</label>
+            <textarea id="integration-params-json" rows="4" placeholder='{"sourceId":"embedded-browser","fps":2}'></textarea>
+            <label>Confirm token</label>
+            <input id="integration-confirm-token" type="text" placeholder="dry-run token appears here" />
+            <div class="button-row">
+              <button class="ghost" type="button" id="integration-actions-refresh">Refresh Catalog</button>
+              <button class="ghost" type="button" id="integration-action-dry-run">Dry Run</button>
+              <button class="ghost" type="button" id="integration-action-execute">Execute</button>
+            </div>
+            <pre id="integration-action-output"></pre>
+            <h3>Bridge Subscribers</h3>
+            <label>Subscriber URL</label>
+            <input id="integration-sub-url" type="text" placeholder="https://example.com/webhooks/stickman" />
+            <label>Events CSV</label>
+            <input id="integration-sub-events" type="text" value="integration_*" />
+            <label>Subscriber ID</label>
+            <input id="integration-sub-id" type="text" placeholder="subscriber id for enable/disable/test/delete" />
+            <div class="button-row">
+              <button class="ghost" type="button" id="integration-subs-refresh">Refresh Subs</button>
+              <button class="ghost" type="button" id="integration-sub-create">Create</button>
+              <button class="ghost" type="button" id="integration-sub-enable">Enable</button>
+              <button class="ghost" type="button" id="integration-sub-disable">Disable</button>
+              <button class="ghost" type="button" id="integration-sub-test">Test</button>
+              <button class="ghost" type="button" id="integration-sub-delete">Delete</button>
+            </div>
+            <pre id="integration-subs-output"></pre>
+            <h3>Bridge Status</h3>
+            <div class="button-row">
+              <button class="ghost" type="button" id="integration-bridge-refresh">Refresh Bridge</button>
+              <button class="ghost" type="button" id="integration-control-token">Mint Control Room Token</button>
+            </div>
+            <pre id="integration-bridge-output"></pre>
             <h3>Extensions</h3>
             <div class="button-row">
               <button class="ghost" type="button" id="ext-x-enable">Enable X Extension</button>

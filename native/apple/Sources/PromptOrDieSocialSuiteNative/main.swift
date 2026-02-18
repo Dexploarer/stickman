@@ -277,6 +277,15 @@ struct ContentView: View {
   @State private var tasksStatusText = "Tasks not loaded."
   @State private var macStatusText = "Mac app status not loaded."
   @State private var watchStatusText = "Watch status not loaded."
+  @State private var integrationsStatusText = "Integration status not loaded."
+  @State private var integrationActionStatusText = "Integration actions not run."
+  @State private var bridgeStatusText = "Bridge status not loaded."
+  @State private var badgeCodingReady = false
+  @State private var badgeSocialReady = false
+  @State private var badgeWatchReady = false
+  @State private var badgeClaudeSession = false
+  @State private var badgeCodexAvailable = false
+  @State private var badgeLivekitConfigured = false
   @State private var approvalId = ""
   @State private var selectedSkillId = "codex.run_task"
   @State private var selectedWatchSource = "embedded-browser"
@@ -285,6 +294,7 @@ struct ContentView: View {
   @State private var activeBrowserTabId: UUID
   @State private var newTabURL = defaultDashboardURL.absoluteString
   @State private var embeddedSnapshotTimer: Timer?
+  @State private var integrationPollTimer: Timer?
 
   init() {
     let savedRoot = UserDefaults.standard.string(forKey: "PODProjectRoot")
@@ -322,6 +332,112 @@ struct ContentView: View {
     } catch {
       return "Request failed: \(error.localizedDescription)"
     }
+  }
+
+  private func performJSONRequest(
+    path: String,
+    method: String = "GET",
+    body: [String: Any]? = nil
+  ) async -> (status: Int, json: [String: Any]?, text: String) {
+    guard let base = URL(string: inputURL), let url = URL(string: path, relativeTo: base) else {
+      return (0, nil, "Invalid dashboard URL.")
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = method
+    request.timeoutInterval = 30
+
+    if let body {
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
+    }
+
+    do {
+      let (data, response) = try await URLSession.shared.data(for: request)
+      let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+      let text = String(data: data, encoding: .utf8) ?? ""
+      let jsonObject = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+      return (statusCode, jsonObject, "[\(statusCode)] \(text)")
+    } catch {
+      return (0, nil, "Request failed: \(error.localizedDescription)")
+    }
+  }
+
+  private func applyIntegrationSnapshot(_ json: [String: Any]) {
+    let integrations = json["integrations"] as? [String: Any]
+    let readiness = integrations?["readiness"] as? [String: Any]
+    let claude = integrations?["claude"] as? [String: Any]
+    let codex = integrations?["codex"] as? [String: Any]
+    let livekit = integrations?["livekit"] as? [String: Any]
+
+    badgeCodingReady = readiness?["codingAgentReady"] as? Bool ?? false
+    badgeSocialReady = readiness?["socialAgentReady"] as? Bool ?? false
+    badgeWatchReady = readiness?["watchReady"] as? Bool ?? false
+    badgeClaudeSession = claude?["sessionDetected"] as? Bool ?? false
+    badgeCodexAvailable = codex?["available"] as? Bool ?? false
+    badgeLivekitConfigured = livekit?["configured"] as? Bool ?? false
+  }
+
+  private func refreshIntegrationStatus() {
+    Task {
+      let integrations = await performJSONRequest(path: "/api/integrations/status")
+      integrationsStatusText = integrations.text
+      if let json = integrations.json {
+        applyIntegrationSnapshot(json)
+      }
+      let bridge = await performRequest(path: "/api/integrations/bridge/status")
+      bridgeStatusText = bridge
+    }
+  }
+
+  private func runIntegrationRunbook(_ actionId: String) {
+    Task {
+      let dryRun = await performJSONRequest(
+        path: "/api/integrations/actions",
+        method: "POST",
+        body: [
+          "mode": "dry_run",
+          "actionId": actionId,
+          "params": [
+            "sourceId": "embedded-browser",
+            "fps": 2,
+          ],
+        ]
+      )
+      integrationActionStatusText = dryRun.text
+      guard dryRun.status == 200,
+        let json = dryRun.json,
+        let confirmToken = json["confirmToken"] as? String,
+        !confirmToken.isEmpty
+      else {
+        return
+      }
+
+      let execute = await performJSONRequest(
+        path: "/api/integrations/actions",
+        method: "POST",
+        body: [
+          "mode": "execute",
+          "actionId": actionId,
+          "params": [
+            "sourceId": "embedded-browser",
+            "fps": 2,
+          ],
+          "confirmToken": confirmToken,
+        ]
+      )
+      integrationActionStatusText = execute.text
+      refreshIntegrationStatus()
+    }
+  }
+
+  private func badgePill(_ label: String, _ ok: Bool) -> some View {
+    Text("\(label): \(ok ? "ready" : "blocked")")
+      .font(.system(.caption2, design: .monospaced))
+      .padding(.horizontal, 8)
+      .padding(.vertical, 4)
+      .background(ok ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
+      .clipShape(Capsule())
   }
 
   private var activeTab: BrowserTab? {
@@ -433,6 +549,16 @@ struct ContentView: View {
         .disabled(!serverManager.isRunning)
       }
 
+      HStack(spacing: 8) {
+        badgePill("coding-agent", badgeCodingReady)
+        badgePill("social-agent", badgeSocialReady)
+        badgePill("watch", badgeWatchReady)
+        badgePill("claude-session", badgeClaudeSession)
+        badgePill("codex", badgeCodexAvailable)
+        badgePill("livekit", badgeLivekitConfigured)
+        Spacer()
+      }
+
       HStack(spacing: 10) {
         TextField("Project root", text: $projectRootInput)
           .textFieldStyle(.roundedBorder)
@@ -504,6 +630,37 @@ struct ContentView: View {
       }
 
       HStack(alignment: .top, spacing: 10) {
+        GroupBox("Integrations") {
+          VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+              Button("Refresh Integrations") {
+                refreshIntegrationStatus()
+              }
+              Button("Prepare Workspace") {
+                runIntegrationRunbook("prepare_observer_workspace")
+              }
+              Button("Launch Watch") {
+                runIntegrationRunbook("launch_watch_surface")
+              }
+              Button("Repair Provider") {
+                runIntegrationRunbook("repair_provider_route")
+              }
+              Button("Recover LiveKit") {
+                runIntegrationRunbook("recover_livekit_bridge")
+              }
+            }
+            ScrollView {
+              Text(integrationsStatusText + "\n\n" + integrationActionStatusText + "\n\n" + bridgeStatusText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                .textSelection(.enabled)
+            }
+            .frame(height: 72)
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity)
+
         GroupBox("Provider") {
           VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
@@ -772,15 +929,27 @@ struct ContentView: View {
         tasksStatusText = await performRequest(path: "/api/agent/tasks")
         macStatusText = await performRequest(path: "/api/mac/apps")
         watchStatusText = await performRequest(path: "/api/watch/sources")
+        let integrations = await performJSONRequest(path: "/api/integrations/status")
+        integrationsStatusText = integrations.text
+        if let json = integrations.json {
+          applyIntegrationSnapshot(json)
+        }
+        bridgeStatusText = await performRequest(path: "/api/integrations/bridge/status")
       }
       embeddedSnapshotTimer?.invalidate()
       embeddedSnapshotTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
         pushEmbeddedWatchFrame()
       }
+      integrationPollTimer?.invalidate()
+      integrationPollTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+        refreshIntegrationStatus()
+      }
     }
     .onDisappear {
       embeddedSnapshotTimer?.invalidate()
       embeddedSnapshotTimer = nil
+      integrationPollTimer?.invalidate()
+      integrationPollTimer = nil
       serverManager.stop()
     }
   }
