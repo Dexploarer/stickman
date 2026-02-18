@@ -104,6 +104,7 @@ describe("api read-only smoke", () => {
 
   it("serves provider, extension, skills, and autonomy control planes", async () => {
     const provider = await apiGet("/api/providers/status");
+    const integrations = await apiGet("/api/integrations/status");
     const extensions = await apiGet("/api/extensions");
     const skills = await apiGet("/api/skills");
     const autonomy = await apiGet("/api/agent/autonomy");
@@ -111,6 +112,7 @@ describe("api read-only smoke", () => {
     const missions = await apiGet("/api/cowork/missions");
 
     expect(provider.status).toBe(200);
+    expect(integrations.status).toBe(200);
     expect(extensions.status).toBe(200);
     expect(skills.status).toBe(200);
     expect(autonomy.status).toBe(200);
@@ -118,6 +120,8 @@ describe("api read-only smoke", () => {
     expect(missions.status).toBe(200);
 
     expect((provider.body as Record<string, unknown>).ok).toBe(true);
+    expect((integrations.body as Record<string, unknown>).ok).toBe(true);
+    expect(typeof (integrations.body as Record<string, unknown>).integrations).toBe("object");
     expect((extensions.body as Record<string, unknown>).ok).toBe(true);
     expect(Array.isArray((skills.body as Record<string, unknown>).skills)).toBe(true);
     expect((autonomy.body as Record<string, unknown>).ok).toBe(true);

@@ -232,6 +232,7 @@ This creates and launches:
 - `GET /api/livekit/status`
 - `POST /api/livekit/config`
 - `POST /api/livekit/token`
+- `GET /api/integrations/status`
 - `GET /api/code/status`
 - `POST /api/code/plan`
 - `POST /api/code/exec`

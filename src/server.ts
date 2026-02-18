@@ -2,7 +2,9 @@ import "dotenv/config";
 
 import cors from "cors";
 import express from "express";
+import { spawnSync } from "node:child_process";
 import { createHash, createHmac, randomUUID } from "node:crypto";
+import { accessSync, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import type { Socket } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -1089,6 +1091,85 @@ const resolveLivekitStatus = (onboarding: OnboardingState): ResolvedLivekitStatu
           ? "LiveKit is enabled, but streamMode=events_only. Set streamMode=events_and_frames for watch transport."
         : "Set wsUrl, apiKey, and LIVEKIT_API_SECRET to enable remote LiveKit streaming.",
   };
+};
+
+const resolveCommandBinary = (command: string, fallback: string): string => {
+  const parts = String(command || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return parts[0] || fallback;
+};
+
+const probeExecutable = (binary: string): { available: boolean; path: string | null } => {
+  const candidate = String(binary || "").trim();
+  if (!candidate) {
+    return { available: false, path: null };
+  }
+  if (path.isAbsolute(candidate)) {
+    try {
+      accessSync(candidate, fsConstants.X_OK);
+      return {
+        available: true,
+        path: candidate,
+      };
+    } catch {
+      return { available: false, path: null };
+    }
+  }
+  try {
+    const probe = spawnSync("which", [candidate], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const resolved = String(probe.stdout || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (probe.status === 0 && resolved) {
+      return {
+        available: true,
+        path: resolved,
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return { available: false, path: null };
+};
+
+const buildProviderFallbackStatus = (onboarding: OnboardingState) => {
+  return {
+    mode: onboarding.providers.mode,
+    claudeSessionDetected: false,
+    openrouterConfigured: Boolean(onboarding.openrouter.apiKey || appConfig.openrouter.apiKey),
+    activeRoute: onboarding.providers.mode,
+    capabilities: {
+      text: onboarding.providers.mode,
+      image: "openrouter",
+      video: "openrouter",
+      embedding: "openrouter",
+      voice: "openrouter",
+    },
+  };
+};
+
+const resolveProviderStatusSafely = async (onboarding: OnboardingState) => {
+  try {
+    const status = await getProviderStatus();
+    return {
+      ok: true as const,
+      status,
+      error: null as string | null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false as const,
+      status: buildProviderFallbackStatus(onboarding),
+      error: message,
+    };
+  }
 };
 
 const isSkillEnabled = (skillId: SkillId, enabledMap: Partial<Record<SkillId, boolean>>): boolean => {
@@ -3117,29 +3198,114 @@ app.post("/api/cowork/quick-action", (req, res) => {
 
 app.get("/api/providers/status", async (_req, res) => {
   const onboarding = await getOnboardingState();
-  try {
-    const status = await getProviderStatus();
-    res.json({ ok: true, status });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    res.json({
-      ok: false,
-      status: {
-        mode: onboarding.providers.mode,
-        claudeSessionDetected: false,
-        openrouterConfigured: Boolean(onboarding.openrouter.apiKey || appConfig.openrouter.apiKey),
-        activeRoute: onboarding.providers.mode,
-        capabilities: {
-          text: onboarding.providers.mode,
-          image: "openrouter",
-          video: "openrouter",
-          embedding: "openrouter",
-          voice: "openrouter",
-        },
-      },
-      error: message,
-    });
+  const provider = await resolveProviderStatusSafely(onboarding);
+  res.json({
+    ok: provider.ok,
+    status: provider.status,
+    error: provider.error,
+  });
+});
+
+app.get("/api/integrations/status", async (_req, res) => {
+  const onboarding = await getOnboardingState();
+  const provider = await resolveProviderStatusSafely(onboarding);
+  const claudeSession = await detectClaudeSession();
+  const claudeCommand = appConfig.claude.cliCommand || "claude -p";
+  const claudeBinary = resolveCommandBinary(claudeCommand, "claude");
+  const claudeCli = probeExecutable(claudeBinary);
+
+  const codexCommand = process.env.CODEX_CLI_COMMAND || "codex";
+  const codexBinary = resolveCommandBinary(codexCommand, "codex");
+  const codexCli = probeExecutable(codexBinary);
+
+  const livekit = resolveLivekitStatus(onboarding);
+  const openrouterSource = onboarding.openrouter.apiKey ? "onboarding" : appConfig.openrouter.apiKey ? "env" : "none";
+  const openrouterConfigured = openrouterSource !== "none";
+
+  const appAllowlist = onboarding.macControl.appAllowlist || [];
+  const allowlistSet = new Set(appAllowlist);
+  const apps = listKnownMacApps().map((app) => ({
+    ...app,
+    allowed: allowlistSet.has(app.id),
+  }));
+  const availableAllowedApps = apps.filter((app) => app.available && app.allowed);
+  const watchSources = listWatchSources();
+  const activeWatchSessions = Array.from(watchSessions.values()).filter((session) => session.active);
+
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  if (!provider.status.claudeSessionDetected && !openrouterConfigured) {
+    blockers.push("No text provider is fully ready (missing Claude session and OpenRouter key).");
   }
+  if (livekit.enabled && !livekit.configured) {
+    blockers.push(`LiveKit is enabled but not configured: missing ${livekit.missing.join(", ")}.`);
+  }
+  if (!codexCli.available) {
+    warnings.push("Codex CLI is not available in PATH.");
+  }
+  if (!claudeCli.available) {
+    warnings.push(`Claude CLI binary '${claudeBinary}' is not available.`);
+  }
+  if (!claudeSession.detected) {
+    warnings.push("Claude subscription session not detected. Run claude login.");
+  }
+  if (!availableAllowedApps.length) {
+    warnings.push("No mac apps are both available and allowed by policy.");
+  }
+  if (!openrouterConfigured) {
+    warnings.push("OpenRouter key is not configured; non-text modalities will fail.");
+  }
+
+  res.json({
+    ok: true,
+    integrations: {
+      readiness: {
+        codingAgentReady: Boolean(codexCli.available && (provider.status.claudeSessionDetected || openrouterConfigured)),
+        socialAgentReady: Boolean(onboarding.extensions.x.enabled),
+        watchReady: Boolean(watchSources.some((source) => source.available) && (!livekit.enabled || livekit.configured)),
+        blockers,
+        warnings,
+      },
+      provider: provider.status,
+      claude: {
+        command: claudeCommand,
+        binary: claudeBinary,
+        cliAvailable: claudeCli.available,
+        cliPath: claudeCli.path,
+        sessionDetected: claudeSession.detected,
+        sessionPath: claudeSession.path,
+      },
+      codex: {
+        command: codexCommand,
+        binary: codexBinary,
+        available: codexCli.available,
+        path: codexCli.path,
+      },
+      openrouter: {
+        configured: openrouterConfigured,
+        keySource: openrouterSource,
+      },
+      livekit,
+      mac: {
+        allowlist: appAllowlist,
+        apps,
+        availableAllowedCount: availableAllowedApps.length,
+      },
+      watch: {
+        sources: watchSources,
+        activeCount: activeWatchSessions.length,
+        activeSessions: activeWatchSessions.map((session) => ({
+          id: session.id,
+          sourceId: session.sourceId,
+          taskId: session.taskId || null,
+          transport: session.transport || "local",
+        })),
+      },
+    },
+    diagnostics: {
+      providerError: provider.error,
+    },
+  });
 });
 
 app.post("/api/providers/mode", async (req, res) => {

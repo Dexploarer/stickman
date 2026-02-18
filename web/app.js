@@ -25,6 +25,7 @@ const state = {
   macApps: [],
   watchSources: [],
   livekitStatus: null,
+  integrations: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -267,6 +268,13 @@ const refreshProviderStatus = async () => {
   const result = await apiGet("/api/providers/status");
   state.providerStatus = result?.status || null;
   setText("provider-status-output", result);
+  return result;
+};
+
+const refreshIntegrations = async () => {
+  const result = await apiGet("/api/integrations/status");
+  state.integrations = result?.integrations || null;
+  setText("integrations-output", result);
   return result;
 };
 
@@ -781,6 +789,18 @@ const refreshLivekitStatus = async () => {
       result?.livekit?.streamMode === "events_and_frames" ? "events_and_frames" : "events_only";
   }
   setText("livekit-output", result);
+  return result;
+};
+
+const runIntegrationAppOpen = async (appId, url) => {
+  const result = await apiPost("/api/mac/apps/open", {
+    appId,
+    url: url || undefined,
+  });
+  setText("integrations-output", result);
+  await refreshMacApps();
+  await refreshCoworkState();
+  await refreshIntegrations();
   return result;
 };
 
@@ -2101,8 +2121,53 @@ const bindDashboardEvents = () => {
   $("provider-refresh")?.addEventListener("click", async () => {
     try {
       await refreshProviderStatus();
+      await refreshIntegrations();
     } catch (error) {
       setText("provider-status-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integrations-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshIntegrations();
+    } catch (error) {
+      setText("integrations-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-open-antigravity")?.addEventListener("click", async () => {
+    try {
+      await runIntegrationAppOpen("antigravity", "antigravity://");
+    } catch (error) {
+      setText("integrations-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-open-terminal")?.addEventListener("click", async () => {
+    try {
+      await runIntegrationAppOpen("terminal");
+    } catch (error) {
+      setText("integrations-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-open-chrome")?.addEventListener("click", async () => {
+    const url = ($("cowork-quick-url")?.value || "").trim() || "https://x.com/home";
+    try {
+      await runIntegrationAppOpen("chrome", url);
+    } catch (error) {
+      setText("integrations-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-claude-login")?.addEventListener("click", async () => {
+    try {
+      const result = await apiPost("/api/claude/login/start", {});
+      setText("integrations-output", result);
+      await refreshProviderStatus();
+      await refreshIntegrations();
+    } catch (error) {
+      setText("integrations-output", error instanceof Error ? error.message : String(error));
     }
   });
 
@@ -3081,6 +3146,7 @@ const boot = async () => {
   await refreshCoworkMissions();
   await refreshMacApps();
   await refreshLivekitStatus();
+  await refreshIntegrations();
   await refreshTaskLogTail();
   renderWatchObserverMeta();
   const initialWatchSession = resolveActiveWatchSession();

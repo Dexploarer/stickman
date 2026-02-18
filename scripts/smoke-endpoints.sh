@@ -79,6 +79,7 @@ fi
 
 req health GET /api/health 200
 req providers_status GET /api/providers/status 200
+req integrations_status GET /api/integrations/status 200
 req providers_mode_invalid POST /api/providers/mode 400 '{"mode":"invalid"}'
 req providers_mode_hybrid POST /api/providers/mode 200 '{"mode":"hybrid"}'
 req cowork_state_initial GET /api/cowork/state 200
