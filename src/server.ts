@@ -2,9 +2,7 @@ import "dotenv/config";
 
 import cors from "cors";
 import express from "express";
-import { spawnSync } from "node:child_process";
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { accessSync, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import type { Socket } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -35,6 +33,7 @@ import { buildIntegrationActionPlan, buildPlannedTrace, executeIntegrationAction
 import { integrationCatalogSteps, integrationRunbooks } from "./integrations/catalog.js";
 import { buildConfirmPayloadHash, consumeConfirmToken, issueConfirmToken } from "./integrations/confirm-tokens.js";
 import { IntegrationBridge } from "./integrations/bridge.js";
+import { getExecutableProbe } from "./integrations/executable-probe.js";
 import { LivekitControlPublisher, type LivekitControlConfig } from "./integrations/livekit-bridge.js";
 import { IntegrationSubscriptionStore } from "./integrations/subscriptions.js";
 import type { IntegrationActionContext } from "./integrations/types.js";
@@ -1185,11 +1184,12 @@ const buildIntegrationStatusPayload = async () => {
   const claudeSession = await detectClaudeSession();
   const claudeCommand = appConfig.claude.cliCommand || "claude -p";
   const claudeBinary = resolveCommandBinary(claudeCommand, "claude");
-  const claudeCli = probeExecutable(claudeBinary);
-
   const codexCommand = process.env.CODEX_CLI_COMMAND || "codex";
   const codexBinary = resolveCommandBinary(codexCommand, "codex");
-  const codexCli = probeExecutable(codexBinary);
+  const [claudeCli, codexCli] = await Promise.all([
+    getExecutableProbe(claudeBinary),
+    getExecutableProbe(codexBinary),
+  ]);
 
   const livekit = resolveLivekitStatus(onboarding);
   applyLivekitBridgeConfig(onboarding, livekit);
@@ -1325,43 +1325,6 @@ const resolveCommandBinary = (command: string, fallback: string): string => {
     .split(/\s+/)
     .filter(Boolean);
   return parts[0] || fallback;
-};
-
-const probeExecutable = (binary: string): { available: boolean; path: string | null } => {
-  const candidate = String(binary || "").trim();
-  if (!candidate) {
-    return { available: false, path: null };
-  }
-  if (path.isAbsolute(candidate)) {
-    try {
-      accessSync(candidate, fsConstants.X_OK);
-      return {
-        available: true,
-        path: candidate,
-      };
-    } catch {
-      return { available: false, path: null };
-    }
-  }
-  try {
-    const probe = spawnSync("which", [candidate], {
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    const resolved = String(probe.stdout || "")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find(Boolean);
-    if (probe.status === 0 && resolved) {
-      return {
-        available: true,
-        path: resolved,
-      };
-    }
-  } catch {
-    // ignore
-  }
-  return { available: false, path: null };
 };
 
 const buildProviderFallbackStatus = (onboarding: OnboardingState) => {

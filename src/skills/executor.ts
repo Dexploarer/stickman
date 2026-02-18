@@ -26,6 +26,25 @@ const toResult = (skillId: SkillId, input: { ok: boolean; message: string; paylo
   };
 };
 
+type GuardedExecutionResult = {
+  ok: boolean;
+  message: string;
+  payload?: Record<string, unknown>;
+  code?: string;
+  approvalId?: string;
+};
+
+const toGuardedSkillResult = (skillId: SkillId, result: GuardedExecutionResult): SkillExecutionResult => {
+  return {
+    ok: result.ok,
+    skillId,
+    message: result.message,
+    payload: result.payload,
+    code: result.code === "approval_required" ? "approval_required" : result.ok ? undefined : "execution_error",
+    approvalId: result.approvalId,
+  };
+};
+
 export const executeSkill = async (
   input: SkillExecutionInput,
   context: RuntimeSkillContext & { workspaceRoot: string },
@@ -96,45 +115,24 @@ export const executeSkill = async (
           code: "invalid_args",
         };
       }
-      const result = await context.runTerminalCommand(command, cwd, { allowApprovalBypass: input.approvalBypass });
-      return {
-        ok: result.ok,
-        skillId: skill.id,
-        message: result.message,
-        payload: result.payload,
-        code: result.code === "approval_required" ? "approval_required" : result.ok ? undefined : "execution_error",
-        approvalId: result.approvalId,
-      };
+      return toGuardedSkillResult(
+        skill.id,
+        await context.runTerminalCommand(command, cwd, { allowApprovalBypass: input.approvalBypass }),
+      );
     }
     case "codex.run_task": {
       const prompt = getString(args.prompt || args.task);
       if (!prompt) {
         return { ok: false, skillId: skill.id, message: "prompt is required", code: "invalid_args" };
       }
-      const result = await context.runCodexTask(prompt, { tool: "codex" });
-      return {
-        ok: result.ok,
-        skillId: skill.id,
-        message: result.message,
-        payload: result.payload,
-        code: result.code === "approval_required" ? "approval_required" : result.ok ? undefined : "execution_error",
-        approvalId: result.approvalId,
-      };
+      return toGuardedSkillResult(skill.id, await context.runCodexTask(prompt, { tool: "codex" }));
     }
     case "claude.run_task": {
       const prompt = getString(args.prompt || args.task);
       if (!prompt) {
         return { ok: false, skillId: skill.id, message: "prompt is required", code: "invalid_args" };
       }
-      const result = await context.runCodexTask(prompt, { tool: "claude" });
-      return {
-        ok: result.ok,
-        skillId: skill.id,
-        message: result.message,
-        payload: result.payload,
-        code: result.code === "approval_required" ? "approval_required" : result.ok ? undefined : "execution_error",
-        approvalId: result.approvalId,
-      };
+      return toGuardedSkillResult(skill.id, await context.runCodexTask(prompt, { tool: "claude" }));
     }
     case "browser.embedded.open_tab": {
       const url = getString(args.url);
@@ -169,15 +167,10 @@ export const executeSkill = async (
           code: "invalid_args",
         };
       }
-      const result = await context.runXEndpoint(endpoint, (args.endpointArgs as Record<string, unknown> | undefined) || {});
-      return {
-        ok: result.ok,
-        skillId: skill.id,
-        message: result.message,
-        payload: result.payload,
-        code: result.code === "approval_required" ? "approval_required" : result.ok ? undefined : "execution_error",
-        approvalId: result.approvalId,
-      };
+      return toGuardedSkillResult(
+        skill.id,
+        await context.runXEndpoint(endpoint, (args.endpointArgs as Record<string, unknown> | undefined) || {}),
+      );
     }
     case "code-workspace.exec": {
       const command = getString(args.command);
@@ -190,15 +183,10 @@ export const executeSkill = async (
           code: "invalid_args",
         };
       }
-      const result = await context.runTerminalCommand(command, cwd, { allowApprovalBypass: input.approvalBypass });
-      return {
-        ok: result.ok,
-        skillId: skill.id,
-        message: result.message,
-        payload: result.payload,
-        code: result.code === "approval_required" ? "approval_required" : result.ok ? undefined : "execution_error",
-        approvalId: result.approvalId,
-      };
+      return toGuardedSkillResult(
+        skill.id,
+        await context.runTerminalCommand(command, cwd, { allowApprovalBypass: input.approvalBypass }),
+      );
     }
     case "workspace.tree": {
       const relDir = getString(args.path);

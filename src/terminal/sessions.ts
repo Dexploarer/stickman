@@ -6,6 +6,7 @@ import type { InteractiveTerminalSessionStatus, InteractiveTerminalSessionSummar
 
 const MAX_BUFFER_CHARS = 200_000;
 const MAX_EVENT_CHUNK_CHARS = 4000;
+const MAX_CLOSED_SESSION_HISTORY = 120;
 
 type TerminalPtyBackend = "pipe" | "node_pty";
 
@@ -26,6 +27,7 @@ interface TerminalInteractiveSession {
 }
 
 const sessions = new Map<string, TerminalInteractiveSession>();
+const closedSessionHistory: InteractiveTerminalSessionSummary[] = [];
 
 const appendBuffer = (base: string, chunk: string): string => {
   const next = `${base}${chunk}`;
@@ -55,6 +57,40 @@ const toSummary = (session: TerminalInteractiveSession): InteractiveTerminalSess
   cols: session.cols,
   rows: session.rows,
 });
+
+const addClosedSessionSummary = (session: TerminalInteractiveSession) => {
+  const summary = toSummary(session);
+  const existingIndex = closedSessionHistory.findIndex((item) => item.id === summary.id);
+  if (existingIndex >= 0) {
+    closedSessionHistory.splice(existingIndex, 1);
+  }
+  closedSessionHistory.unshift(summary);
+  if (closedSessionHistory.length > MAX_CLOSED_SESSION_HISTORY) {
+    closedSessionHistory.length = MAX_CLOSED_SESSION_HISTORY;
+  }
+};
+
+const finalizeSession = (session: TerminalInteractiveSession, input?: { exitCode?: number; emitExitEvent?: boolean }) => {
+  if (session.status === "exited") {
+    return;
+  }
+  session.status = "exited";
+  if (typeof input?.exitCode === "number" && Number.isFinite(input.exitCode)) {
+    session.exitCode = input.exitCode;
+  }
+  if (input?.emitExitEvent ?? true) {
+    emit(session, {
+      type: "terminal_exit",
+      ts: new Date().toISOString(),
+      sessionId: session.id,
+      payload: {
+        exitCode: session.exitCode,
+      },
+    });
+  }
+  addClosedSessionSummary(session);
+  sessions.delete(session.id);
+};
 
 let nodePtyModule: unknown | null | undefined = undefined;
 
@@ -120,16 +156,8 @@ export const createTerminalSession = async (input: {
   };
 
   const markExited = (code: unknown) => {
-    session.status = "exited";
-    session.exitCode = typeof code === "number" && Number.isFinite(code) ? code : 1;
-    emit(session, {
-      type: "terminal_exit",
-      ts: new Date().toISOString(),
-      sessionId: session.id,
-      payload: {
-        exitCode: session.exitCode,
-      },
-    });
+    const exitCode = typeof code === "number" && Number.isFinite(code) ? code : 1;
+    finalizeSession(session, { exitCode, emitExitEvent: true });
   };
 
   const initPipeBackend = (): ChildProcessWithoutNullStreams => {
@@ -235,10 +263,14 @@ export const createTerminalSession = async (input: {
 
 export const listTerminalSessions = (limit = 25): InteractiveTerminalSessionSummary[] => {
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
-  return Array.from(sessions.values())
+  const active = Array.from(sessions.values())
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, safeLimit)
     .map((session) => toSummary(session));
+  if (active.length >= safeLimit) {
+    return active;
+  }
+  return [...active, ...closedSessionHistory.slice(0, safeLimit - active.length)];
 };
 
 export const getTerminalSession = (id: string): TerminalInteractiveSession | null => {
@@ -287,7 +319,7 @@ export const closeTerminalSession = (id: string): { ok: true } | { ok: false; er
   } catch {
     // ignore
   }
-  session.status = "exited";
+  finalizeSession(session, { emitExitEvent: true });
   return { ok: true };
 };
 
