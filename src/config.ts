@@ -6,7 +6,16 @@ import type { ModelPreferences, OnboardingState, SkillId, XArgMap } from "./type
 
 const currentFile = fileURLToPath(import.meta.url);
 const srcDir = path.dirname(currentFile);
-export const projectRoot = path.resolve(srcDir, "..");
+const resolveSuiteRoot = (): string => {
+  const raw = (process.env.POD_SUITE_ROOT || "").trim();
+  if (!raw) {
+    return path.resolve(srcDir, "..");
+  }
+  const expanded = raw.startsWith("~") ? path.resolve(os.homedir(), raw.slice(1)) : raw;
+  return path.isAbsolute(expanded) ? expanded : path.resolve(expanded);
+};
+
+export const projectRoot = resolveSuiteRoot();
 export const stateDir = path.resolve(projectRoot, ".state");
 export const onboardingStatePath = path.resolve(stateDir, "onboarding.json");
 export const modelCachePath = path.resolve(stateDir, "openrouter-models-cache.json");

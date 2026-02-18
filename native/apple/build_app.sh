@@ -60,7 +60,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/home/.bun/bin:\$PATH"
 SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
 APP_ROOT="\$(cd "\$SCRIPT_DIR/.." && pwd)"
 SERVER_BUNDLE="\$APP_ROOT/Resources/server.mjs"
-export POD_SUITE_ROOT="\$APP_ROOT"
+export POD_SUITE_ROOT="\${POD_SUITE_ROOT:-$PROJECT_ROOT}"
 
 NODE_BIN="\${POD_NODE_PATH}"
 if [[ ! -x "\$NODE_BIN" ]]; then

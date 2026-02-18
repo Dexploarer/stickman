@@ -79,6 +79,13 @@ final class LocalServerManager: ObservableObject {
     let existingPath = env["PATH"] ?? ""
     env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/Users/home/.bun/bin:\(existingPath)"
     env["POD_SUITE_ROOT"] = rootPath
+    let nodeModulesPath = URL(fileURLWithPath: rootPath, isDirectory: true).appendingPathComponent("node_modules").path
+    let existingNodePath = (env["NODE_PATH"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if existingNodePath.isEmpty {
+      env["NODE_PATH"] = nodeModulesPath
+    } else if !existingNodePath.split(separator: ":").contains(Substring(nodeModulesPath)) {
+      env["NODE_PATH"] = "\(nodeModulesPath):\(existingNodePath)"
+    }
     newProcess.environment = env
 
     let out = Pipe()
