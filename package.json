@@ -10,6 +10,7 @@
     "test": "bun test",
     "test:once": "bun test",
     "smoke:api": "bash scripts/smoke-endpoints.sh",
+    "pre-review:local": "bun scripts/pre-review-local.mjs",
     "verify": "bunx tsc --noEmit && bun test && bun run smoke:api",
     "tui": "bun src/tui.ts",
     "x:setup": "bash scripts/setup-worktree.sh",
