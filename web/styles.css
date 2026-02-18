@@ -596,6 +596,24 @@ form {
   max-height: 320px;
 }
 
+.terminal-xterm {
+  min-height: 220px;
+  height: 320px;
+  border: 1px solid rgba(15, 36, 41, 0.18);
+  border-radius: 10px;
+  background: rgba(15, 36, 41, 0.95);
+  overflow: hidden;
+}
+
+.terminal-xterm .xterm {
+  height: 100%;
+  padding: 6px 2px;
+}
+
+.terminal-pty-panel.xterm-active #terminal-pty-output {
+  display: none;
+}
+
 pre {
   margin: 9px 0 0;
   max-height: 340px;

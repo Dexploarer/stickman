@@ -17,6 +17,8 @@ describe("skills/catalog", () => {
       "claude.run_task",
       "x-social.run_endpoint",
       "code-workspace.exec",
+      "workspace.tree",
+      "git.status",
     ];
 
     required.forEach((id) => {

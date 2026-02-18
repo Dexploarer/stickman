@@ -6,10 +6,11 @@
     <title>Prompt or Die Social Suite</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
+      <link
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -784,6 +785,7 @@
                     <button class="ghost" type="button" id="terminal-pty-send">Send</button>
                     <button class="ghost" type="button" id="terminal-pty-sendline">Send Line</button>
                   </div>
+                  <div id="terminal-pty-xterm" class="terminal-xterm"></div>
                   <pre id="terminal-pty-output"></pre>
                 </div>
               </section>
@@ -977,6 +979,8 @@
       </section>
     </main>
 
+    <script src="/vendor/xterm/lib/xterm.js"></script>
+    <script src="/vendor/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

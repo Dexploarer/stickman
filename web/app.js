@@ -761,38 +761,175 @@ const executeGitAction = async (action) => {
   return result;
 };
 
-let terminalPtyWs = null;
+  let terminalPtyWs = null;
+  let terminalPtyXterm = null;
+  let terminalPtyFitAddon = null;
+  let terminalPtyResizeTimer = null;
+  let terminalPtyPendingInput = "";
+  let terminalPtyInputTimer = null;
 
-const appendTerminalPtyOutput = (chunk) => {
-  const node = $("terminal-pty-output");
-  if (!node) {
-    return;
-  }
-  const next = `${node.textContent || ""}${String(chunk || "")}`;
-  node.textContent = next.slice(Math.max(0, next.length - 200_000));
-  node.scrollTop = node.scrollHeight;
-};
+  const stripAnsiCodes = (value) => String(value || "").replace(/\u001b\[[0-9;]*m/g, "");
 
-const refreshTerminalPtySessions = async () => {
-  const result = await apiGet("/api/terminal/sessions");
-  state.terminalPtySessions = Array.isArray(result?.sessions) ? result.sessions : [];
+  const isTerminalPtyXtermAvailable = () =>
+    typeof window !== "undefined" &&
+    typeof window.Terminal === "function" &&
+    window.FitAddon &&
+    typeof window.FitAddon.FitAddon === "function";
+
+  const scheduleTerminalPtyResizeSync = () => {
+    if (!terminalPtyXterm || !terminalPtyFitAddon) {
+      return;
+    }
+    const sessionId = readTerminalPtySessionId();
+    if (!sessionId) {
+      return;
+    }
+    if (terminalPtyResizeTimer) {
+      return;
+    }
+    terminalPtyResizeTimer = setTimeout(async () => {
+      terminalPtyResizeTimer = null;
+      try {
+        terminalPtyFitAddon.fit();
+      } catch {
+        // ignore
+      }
+      try {
+        await apiPost(`/api/terminal/sessions/${encodeURIComponent(sessionId)}/resize`, {
+          cols: terminalPtyXterm.cols,
+          rows: terminalPtyXterm.rows,
+        });
+      } catch {
+        // ignore
+      }
+    }, 80);
+  };
+
+  const ensureTerminalPtyXterm = () => {
+    const mount = $("terminal-pty-xterm");
+    if (!mount || !isTerminalPtyXtermAvailable()) {
+      return null;
+    }
+    if (terminalPtyXterm) {
+      return terminalPtyXterm;
+    }
+
+    const term = new window.Terminal({
+      cursorBlink: true,
+      convertEol: true,
+      scrollback: 5000,
+      fontFamily:
+        '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      fontSize: 12,
+      theme: {
+        background: "#0f2421",
+        foreground: "#dcf5f1",
+        cursor: "#dcf5f1",
+        selectionBackground: "rgba(220,245,241,0.2)",
+      },
+    });
+    const fitAddon = new window.FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(mount);
+    fitAddon.fit();
+
+    const panel = mount.closest(".terminal-pty-panel");
+    if (panel) {
+      panel.classList.add("xterm-active");
+    }
+
+    term.onData((data) => {
+      terminalPtyPendingInput += String(data || "");
+      if (terminalPtyInputTimer) {
+        return;
+      }
+      terminalPtyInputTimer = setTimeout(async () => {
+        terminalPtyInputTimer = null;
+        const payload = terminalPtyPendingInput;
+        terminalPtyPendingInput = "";
+        if (!payload) {
+          return;
+        }
+        const sessionId = readTerminalPtySessionId();
+        if (!sessionId) {
+          return;
+        }
+        try {
+          await apiPost(`/api/terminal/sessions/${encodeURIComponent(sessionId)}/input`, {
+            data: payload,
+          });
+        } catch {
+          // ignore
+        }
+      }, 35);
+    });
+
+    window.addEventListener("resize", () => scheduleTerminalPtyResizeSync());
+
+    terminalPtyXterm = term;
+    terminalPtyFitAddon = fitAddon;
+    return term;
+  };
+
+  const setTerminalPtyOutput = (buffer) => {
+    const raw = String(buffer || "");
+    const pre = $("terminal-pty-output");
+    if (pre) {
+      const text = stripAnsiCodes(raw);
+      pre.textContent = text.slice(Math.max(0, text.length - 200_000));
+      pre.scrollTop = pre.scrollHeight;
+    }
+    const term = ensureTerminalPtyXterm();
+    if (term) {
+      term.reset();
+      term.write(raw);
+      try {
+        terminalPtyFitAddon.fit();
+      } catch {
+        // ignore
+      }
+      scheduleTerminalPtyResizeSync();
+      term.focus();
+    }
+  };
+
+  const appendTerminalPtyOutput = (chunk) => {
+    const node = $("terminal-pty-output");
+    const raw = String(chunk || "");
+
+    if (terminalPtyXterm) {
+      terminalPtyXterm.write(raw);
+    }
+
+    if (node) {
+      const sanitized = stripAnsiCodes(raw);
+      const next = `${node.textContent || ""}${sanitized}`;
+      node.textContent = next.slice(Math.max(0, next.length - 200_000));
+      node.scrollTop = node.scrollHeight;
+    }
+  };
+
+  const refreshTerminalPtySessions = async () => {
+    const result = await apiGet("/api/terminal/sessions");
+    state.terminalPtySessions = Array.isArray(result?.sessions) ? result.sessions : [];
   const select = $("terminal-pty-session-select");
   if (select) {
     const current = state.terminalPtyActiveSessionId || select.value;
     select.innerHTML = "";
     const fallback = document.createElement("option");
     fallback.value = "";
-    fallback.textContent = "select session";
-    select.appendChild(fallback);
-    state.terminalPtySessions.slice(0, 50).forEach((session) => {
-      const option = document.createElement("option");
-      option.value = session.id;
-      option.textContent = `${session.id} • ${session.status} • ${session.cwd}`;
-      select.appendChild(option);
-    });
-    if (current && state.terminalPtySessions.some((session) => session.id === current)) {
-      select.value = current;
-      state.terminalPtyActiveSessionId = current;
+      fallback.textContent = "select session";
+      select.appendChild(fallback);
+      state.terminalPtySessions.slice(0, 50).forEach((session) => {
+        const option = document.createElement("option");
+        option.value = session.id;
+        const backend = session.backend ? ` • ${session.backend}` : "";
+        option.textContent = `${session.id}${backend} • ${session.status} • ${session.cwd}`;
+        select.appendChild(option);
+      });
+      if (current && state.terminalPtySessions.some((session) => session.id === current)) {
+        select.value = current;
+        state.terminalPtyActiveSessionId = current;
     } else if (state.terminalPtySessions[0]) {
       select.value = state.terminalPtySessions[0].id;
       state.terminalPtyActiveSessionId = state.terminalPtySessions[0].id;
@@ -801,9 +938,11 @@ const refreshTerminalPtySessions = async () => {
       state.terminalPtyActiveSessionId = "";
     }
   }
-  setText("terminal-pty-output", result);
-  return result;
-};
+    if (result?.ok === false) {
+      appendTerminalPtyOutput(`\n[error] ${result.error || result.code || "terminal_pty_error"}\n`);
+    }
+    return result;
+  };
 
 const readTerminalPtySessionId = () => {
   const selected = ($("terminal-pty-session-select")?.value || "").trim();
@@ -813,11 +952,11 @@ const readTerminalPtySessionId = () => {
   return String(state.terminalPtyActiveSessionId || "").trim();
 };
 
-const connectTerminalPtyWs = () => {
-  const sessionId = readTerminalPtySessionId();
-  if (!sessionId) {
-    appendTerminalPtyOutput("\n[error] select a terminal session first.\n");
-    return;
+  const connectTerminalPtyWs = () => {
+    const sessionId = readTerminalPtySessionId();
+    if (!sessionId) {
+      appendTerminalPtyOutput("\n[error] select a terminal session first.\n");
+      return;
   }
   if (terminalPtyWs) {
     try {
@@ -830,33 +969,35 @@ const connectTerminalPtyWs = () => {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${scheme}://${window.location.host}/api/terminal/ws?sessionId=${encodeURIComponent(sessionId)}`;
   const ws = new WebSocket(url);
-  terminalPtyWs = ws;
-  appendTerminalPtyOutput(`\n[connect] ${sessionId}\n`);
-  ws.addEventListener("message", (event) => {
-    const raw = typeof event.data === "string" ? event.data : "";
-    const parsed = parseMaybeJSON(raw);
-    if (!parsed || typeof parsed !== "object") {
+    terminalPtyWs = ws;
+    ensureTerminalPtyXterm();
+    appendTerminalPtyOutput(`\n[connect] ${sessionId}\n`);
+    ws.addEventListener("message", (event) => {
+      const raw = typeof event.data === "string" ? event.data : "";
+      const parsed = parseMaybeJSON(raw);
+      if (!parsed || typeof parsed !== "object") {
       appendTerminalPtyOutput(raw);
       return;
     }
-    const type = parsed.type;
-    const payload = parsed.payload || {};
-    if (type === "terminal_bootstrap") {
-      if (typeof payload.buffer === "string" && payload.buffer) {
-        appendTerminalPtyOutput(payload.buffer);
+      const type = parsed.type;
+      const payload = parsed.payload || {};
+      if (type === "terminal_bootstrap") {
+        if (typeof payload.buffer === "string" && payload.buffer) {
+          setTerminalPtyOutput(payload.buffer);
+        }
+        return;
       }
-      return;
-    }
-    if (type === "terminal_output") {
-      if (typeof payload.chunk === "string") {
-        appendTerminalPtyOutput(payload.chunk);
+      if (type === "terminal_output") {
+        if (typeof payload.chunk === "string") {
+          appendTerminalPtyOutput(payload.chunk);
+        }
+        scheduleTerminalPtyResizeSync();
+        return;
       }
-      return;
-    }
-    if (type === "terminal_exit") {
-      appendTerminalPtyOutput(`\n[exit] ${payload.exitCode}\n`);
-    }
-  });
+      if (type === "terminal_exit") {
+        appendTerminalPtyOutput(`\n[exit] ${payload.exitCode}\n`);
+      }
+    });
   ws.addEventListener("close", () => {
     appendTerminalPtyOutput("\n[disconnect]\n");
   });
@@ -877,14 +1018,24 @@ const disconnectTerminalPtyWs = () => {
   terminalPtyWs = null;
 };
 
-const createTerminalPtySession = async () => {
-  const cwd = ($("terminal-pty-cwd")?.value || "").trim();
-  const result = await apiPost("/api/terminal/sessions", {
-    cwd: cwd || undefined,
-  });
-  if (result?.session?.id) {
-    state.terminalPtyActiveSessionId = result.session.id;
-  }
+  const createTerminalPtySession = async () => {
+    const cwd = ($("terminal-pty-cwd")?.value || "").trim();
+    const term = ensureTerminalPtyXterm();
+    if (term) {
+      try {
+        terminalPtyFitAddon.fit();
+      } catch {
+        // ignore
+      }
+    }
+    const result = await apiPost("/api/terminal/sessions", {
+      cwd: cwd || undefined,
+      cols: term ? term.cols : undefined,
+      rows: term ? term.rows : undefined,
+    });
+    if (result?.session?.id) {
+      state.terminalPtyActiveSessionId = result.session.id;
+    }
   await refreshTerminalPtySessions();
   appendTerminalPtyOutput(`\n[created] ${result?.session?.id || "unknown"}\n`);
   return result;

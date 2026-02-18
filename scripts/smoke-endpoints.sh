@@ -79,6 +79,8 @@ if ! wait_for_health; then
 fi
 
 req health GET /api/health 200
+req workbench_xterm_css GET /vendor/xterm/css/xterm.css 200
+req workbench_skill_git_status POST /api/skills/run 200 '{"skillId":"git.status","args":{}}'
 req workbench_workspace_tree GET "/api/workspace/tree?path=src" 200
 req workbench_workspace_file GET "/api/workspace/file?path=src%2Fconfig.ts" 200
 req workbench_git_status GET /api/git/status 200

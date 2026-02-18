@@ -60,6 +60,28 @@ describe("skills/executor", () => {
     expect(result.message).toContain("command");
   });
 
+  it("rejects manual-only workbench skills outside manual mode", async () => {
+    const result = await executeSkill(
+      { skillId: "git.push", mode: "autonomy", args: {} },
+      createContext(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("invalid_args");
+    expect(result.message).toContain("mode");
+  });
+
+  it("validates required args for workspace.read_file", async () => {
+    const result = await executeSkill(
+      { skillId: "workspace.read_file", args: {} },
+      createContext(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("invalid_args");
+    expect(result.message).toContain("path");
+  });
+
   it("maps codex execution failures to execution_error", async () => {
     const result = await executeSkill(
       { skillId: "codex.run_task", args: { prompt: "refactor this" } },

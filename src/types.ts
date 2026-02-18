@@ -18,7 +18,16 @@ export type SkillId =
   | "browser.embedded.open_tab"
   | "browser.external.chrome.open"
   | "x-social.run_endpoint"
-  | "code-workspace.exec";
+  | "code-workspace.exec"
+  | "workspace.tree"
+  | "workspace.read_file"
+  | "workspace.write_file"
+  | "git.status"
+  | "git.log"
+  | "git.diff"
+  | "git.create_branch"
+  | "git.commit"
+  | "git.push";
 export type TaskStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
 export type IntegrationActionMode = "dry_run" | "execute";
 export type IntegrationActionId =
@@ -478,6 +487,7 @@ export interface InteractiveTerminalSessionSummary {
   id: string;
   cwd: string;
   status: InteractiveTerminalSessionStatus;
+  backend?: "pipe" | "node_pty";
   createdAt: string;
   exitCode?: number;
   cols?: number;

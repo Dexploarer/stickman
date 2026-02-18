@@ -92,6 +92,7 @@ Setup now also guarantees per-worktree local state scaffolding:
 - `PORDIE_SCOPE=global|project` (optional) forces export scope regardless of onboarding value
 - `STICKMAN_DB_PATH` (optional) overrides local SQLite path (default: `./.state/stickman.db`)
 - `TERMINAL_PTY_ENABLED=true` enables experimental PTY endpoint surface (default is guarded command terminal only)
+- `TERMINAL_PTY_BACKEND=pipe|node_pty` selects interactive terminal backend when enabled (default: `pipe`, `node_pty` requires `node-pty` and may only work under Node)
 - `X_NOTIFY` defaults to enabled when unset
 - Local secret import is explicit one-shot permission only (`allowLocalSecretsRead=true`)
 - X operations may still require interactive challenge/2FA/human verification depending on account state

@@ -7,24 +7,25 @@ import type { InteractiveTerminalSessionStatus, InteractiveTerminalSessionSummar
 const MAX_BUFFER_CHARS = 200_000;
 const MAX_EVENT_CHUNK_CHARS = 4000;
 
+type TerminalPtyBackend = "pipe" | "node_pty";
+
 interface TerminalInteractiveSession {
   id: string;
   cwd: string;
   createdAt: string;
   status: InteractiveTerminalSessionStatus;
+  backend: TerminalPtyBackend;
   exitCode?: number;
   cols?: number;
   rows?: number;
   buffer: string;
-  child: ChildProcessWithoutNullStreams;
+  write: (data: string) => void;
+  resize: (cols: number, rows: number) => void;
+  kill: () => void;
   listeners: Set<(event: TerminalWsEvent) => void>;
 }
 
 const sessions = new Map<string, TerminalInteractiveSession>();
-
-const stripAnsi = (value: string): string => {
-  return value.replace(/\u001b\[[0-9;]*m/g, "");
-};
 
 const appendBuffer = (base: string, chunk: string): string => {
   const next = `${base}${chunk}`;
@@ -48,44 +49,64 @@ const toSummary = (session: TerminalInteractiveSession): InteractiveTerminalSess
   id: session.id,
   cwd: session.cwd,
   status: session.status,
+  backend: session.backend,
   createdAt: session.createdAt,
   exitCode: session.exitCode,
   cols: session.cols,
   rows: session.rows,
 });
 
-export const createTerminalSession = (input: {
+let nodePtyModule: unknown | null | undefined = undefined;
+
+const loadNodePty = async (): Promise<any | null> => {
+  if (nodePtyModule !== undefined) {
+    return nodePtyModule as any;
+  }
+  try {
+    // @ts-ignore - optional dependency (may be absent in Bun installs)
+    const imported: any = await import("node-pty");
+    nodePtyModule = imported?.default || imported;
+  } catch {
+    nodePtyModule = null;
+  }
+  return nodePtyModule as any;
+};
+
+export const createTerminalSession = async (input: {
   projectRoot: string;
   cwd?: string;
   cols?: number;
   rows?: number;
-}): { ok: true; session: InteractiveTerminalSessionSummary } | { ok: false; error: string } => {
+  backend?: TerminalPtyBackend;
+}): Promise<{ ok: true; session: InteractiveTerminalSessionSummary } | { ok: false; error: string }> => {
   const cwd = resolveWorkspaceCwd(input.projectRoot, input.cwd);
   const id = randomUUID();
   const createdAt = new Date().toISOString();
 
-  const child = spawn("/bin/zsh", ["-l"], {
-    cwd,
-    shell: false,
-    env: process.env,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  const cols = typeof input.cols === "number" && Number.isFinite(input.cols) ? Math.floor(input.cols) : undefined;
+  const rows = typeof input.rows === "number" && Number.isFinite(input.rows) ? Math.floor(input.rows) : undefined;
+
+  const requestedBackend: TerminalPtyBackend = input.backend === "node_pty" ? "node_pty" : "pipe";
+  let warning = "";
 
   const session: TerminalInteractiveSession = {
     id,
     cwd,
     createdAt,
     status: "running",
-    cols: typeof input.cols === "number" ? input.cols : undefined,
-    rows: typeof input.rows === "number" ? input.rows : undefined,
+    backend: "pipe",
+    cols,
+    rows,
     buffer: "",
-    child,
+    write: () => {},
+    resize: () => {},
+    kill: () => {},
     listeners: new Set(),
   };
   sessions.set(id, session);
 
   const pushOutput = (stream: "stdout" | "stderr", raw: string) => {
-    const text = stripAnsi(raw);
+    const text = String(raw ?? "");
     session.buffer = appendBuffer(session.buffer, text);
     emit(session, {
       type: "terminal_output",
@@ -98,12 +119,9 @@ export const createTerminalSession = (input: {
     });
   };
 
-  child.stdout.on("data", (chunk: Buffer | string) => pushOutput("stdout", chunk.toString()));
-  child.stderr.on("data", (chunk: Buffer | string) => pushOutput("stderr", chunk.toString()));
-
-  child.on("close", (code) => {
+  const markExited = (code: unknown) => {
     session.status = "exited";
-    session.exitCode = typeof code === "number" ? code : 1;
+    session.exitCode = typeof code === "number" && Number.isFinite(code) ? code : 1;
     emit(session, {
       type: "terminal_exit",
       ts: new Date().toISOString(),
@@ -112,11 +130,105 @@ export const createTerminalSession = (input: {
         exitCode: session.exitCode,
       },
     });
-  });
+  };
 
-  child.on("error", (error) => {
-    pushOutput("stderr", `\n[spawn_error] ${error.message}\n`);
-  });
+  const initPipeBackend = (): ChildProcessWithoutNullStreams => {
+    const child = spawn("/bin/zsh", ["-l"], {
+      cwd,
+      shell: false,
+      env: process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    session.backend = "pipe";
+    session.write = (data) => {
+      child.stdin.write(String(data ?? ""));
+    };
+    session.resize = () => {
+      // best-effort only for pipe backend
+    };
+    session.kill = () => {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // ignore
+      }
+    };
+
+    child.stdout.on("data", (chunk: Buffer | string) => pushOutput("stdout", chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer | string) => pushOutput("stderr", chunk.toString()));
+    child.on("close", (code) => markExited(code));
+    child.on("error", (error) => pushOutput("stderr", `\n[spawn_error] ${error.message}\n`));
+    return child;
+  };
+
+  if (requestedBackend === "node_pty") {
+    const nodePty = await loadNodePty();
+    if (!nodePty) {
+      warning = "[pty_backend] node-pty not available; falling back to pipe backend.\n";
+    } else {
+      try {
+        const safeCols = typeof cols === "number" ? Math.max(20, Math.min(240, cols)) : 120;
+        const safeRows = typeof rows === "number" ? Math.max(5, Math.min(120, rows)) : 30;
+        const env = {
+          ...process.env,
+          TERM: process.env.TERM || "xterm-256color",
+        };
+
+        const ptyProcess: any = nodePty.spawn("/bin/zsh", ["-l"], {
+          name: "xterm-256color",
+          cols: safeCols,
+          rows: safeRows,
+          cwd,
+          env,
+        });
+
+        session.backend = "node_pty";
+        session.cols = safeCols;
+        session.rows = safeRows;
+        session.write = (data) => {
+          ptyProcess.write(String(data ?? ""));
+        };
+        session.resize = (nextCols, nextRows) => {
+          try {
+            ptyProcess.resize(nextCols, nextRows);
+          } catch {
+            // ignore
+          }
+        };
+        session.kill = () => {
+          try {
+            ptyProcess.kill();
+          } catch {
+            // ignore
+          }
+        };
+
+        if (typeof ptyProcess.onData === "function") {
+          ptyProcess.onData((data: string) => pushOutput("stdout", data));
+        } else if (typeof ptyProcess.on === "function") {
+          ptyProcess.on("data", (data: string) => pushOutput("stdout", data));
+        }
+
+        if (typeof ptyProcess.onExit === "function") {
+          ptyProcess.onExit((event: { exitCode?: number }) => markExited(event?.exitCode));
+        } else if (typeof ptyProcess.on === "function") {
+          ptyProcess.on("exit", (code: number) => markExited(code));
+        }
+      } catch (error) {
+        warning = `[pty_backend] node-pty failed to start; falling back to pipe backend: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`;
+      }
+    }
+  }
+
+  if (session.backend === "pipe") {
+    initPipeBackend();
+  }
+
+  if (warning) {
+    pushOutput("stderr", warning);
+  }
 
   return { ok: true, session: toSummary(session) };
 };
@@ -143,7 +255,7 @@ export const sendTerminalSessionInput = (id: string, data: string): { ok: true }
     return { ok: false, error: "session is not running." };
   }
   try {
-    session.child.stdin.write(String(data ?? ""));
+    session.write(String(data ?? ""));
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -155,8 +267,13 @@ export const resizeTerminalSession = (id: string, cols?: number, rows?: number):
   if (!session) {
     return { ok: false, error: "session not found." };
   }
-  session.cols = typeof cols === "number" ? Math.max(20, Math.min(240, Math.floor(cols))) : session.cols;
-  session.rows = typeof rows === "number" ? Math.max(5, Math.min(120, Math.floor(rows))) : session.rows;
+  const nextCols = typeof cols === "number" ? Math.max(20, Math.min(240, Math.floor(cols))) : session.cols;
+  const nextRows = typeof rows === "number" ? Math.max(5, Math.min(120, Math.floor(rows))) : session.rows;
+  session.cols = nextCols;
+  session.rows = nextRows;
+  if (session.status === "running" && typeof nextCols === "number" && typeof nextRows === "number") {
+    session.resize(nextCols, nextRows);
+  }
   return { ok: true };
 };
 
@@ -166,7 +283,7 @@ export const closeTerminalSession = (id: string): { ok: true } | { ok: false; er
     return { ok: false, error: "session not found." };
   }
   try {
-    session.child.kill("SIGTERM");
+    session.kill();
   } catch {
     // ignore
   }
@@ -190,4 +307,3 @@ export const addTerminalSessionListener = (
     },
   };
 };
-

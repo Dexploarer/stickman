@@ -162,6 +162,9 @@ describe("api read-only smoke", () => {
     const gitStatus = await apiGet("/api/git/status");
     const gitLog = await apiGet("/api/git/log?limit=5");
     const gitDiff = await apiGet("/api/git/diff?staged=0");
+    const xtermCss = await apiGet("/vendor/xterm/css/xterm.css");
+    const skillGitStatus = await apiPost("/api/skills/run", { skillId: "git.status", args: {} });
+    const skillWorkspaceTree = await apiPost("/api/skills/run", { skillId: "workspace.tree", args: { path: "src" } });
     const wsUpgrade = await apiGet("/api/live/ws");
 
     expect(tasks.status).toBe(200);
@@ -180,6 +183,9 @@ describe("api read-only smoke", () => {
     expect(gitStatus.status).toBe(200);
     expect(gitLog.status).toBe(200);
     expect(gitDiff.status).toBe(200);
+    expect(xtermCss.status).toBe(200);
+    expect(skillGitStatus.status).toBe(200);
+    expect(skillWorkspaceTree.status).toBe(200);
     expect(wsUpgrade.status).toBe(426);
 
     expect((tasks.body as Record<string, unknown>).ok).toBe(true);
@@ -202,6 +208,8 @@ describe("api read-only smoke", () => {
     expect(Array.isArray((gitLog.body as Record<string, unknown>).commits)).toBe(true);
     expect((gitDiff.body as Record<string, unknown>).ok).toBe(true);
     expect(typeof (gitDiff.body as Record<string, unknown>).diff).toBe("string");
+    expect((skillGitStatus.body as Record<string, unknown>).ok).toBe(true);
+    expect((skillWorkspaceTree.body as Record<string, unknown>).ok).toBe(true);
     expect((wsUpgrade.body as Record<string, unknown>).ok).toBe(false);
   });
 });

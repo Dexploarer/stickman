@@ -62,6 +62,14 @@ const normalizeLivekitStreamMode = (value: string | undefined): "events_only" | 
   return "events_only";
 };
 
+const normalizeTerminalPtyBackend = (value: string | undefined): "pipe" | "node_pty" => {
+  const normalized = toOptional(value)?.toLowerCase();
+  if (normalized === "node_pty" || normalized === "node-pty" || normalized === "nodepty") {
+    return "node_pty";
+  }
+  return "pipe";
+};
+
 export const appConfig = {
   port: Number(process.env.PORT || 8787),
   db: {
@@ -69,6 +77,7 @@ export const appConfig = {
   },
   terminal: {
     ptyEnabled: toBool(process.env.TERMINAL_PTY_ENABLED, false),
+    ptyBackend: normalizeTerminalPtyBackend(process.env.TERMINAL_PTY_BACKEND),
   },
   claude: {
     sessionPath: toOptional(process.env.CLAUDE_SESSION_PATH),
@@ -196,6 +205,15 @@ export const defaultOnboardingState = (): OnboardingState => ({
       "browser.external.chrome.open": true,
       "x-social.run_endpoint": true,
       "code-workspace.exec": true,
+      "workspace.tree": true,
+      "workspace.read_file": true,
+      "workspace.write_file": true,
+      "git.status": true,
+      "git.log": true,
+      "git.diff": true,
+      "git.create_branch": true,
+      "git.commit": true,
+      "git.push": true,
     } as Partial<Record<SkillId, boolean>>,
   },
   macControl: {

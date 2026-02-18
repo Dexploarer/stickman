@@ -5187,11 +5187,12 @@ const respondTerminalPtyDisabled = (res: Response) => {
   res.status(423).json({
     ok: false,
     code: "terminal_pty_disabled",
-    error: "Interactive PTY terminal is disabled. Set TERMINAL_PTY_ENABLED=true to enable.",
+    error:
+      "Interactive PTY terminal is disabled. Set TERMINAL_PTY_ENABLED=true to enable. (Optional: TERMINAL_PTY_BACKEND=node_pty for real PTY.)",
   });
 };
 
-app.post("/api/terminal/sessions", (req, res) => {
+app.post("/api/terminal/sessions", async (req, res) => {
   if (!appConfig.terminal.ptyEnabled) {
     respondTerminalPtyDisabled(res);
     return;
@@ -5202,7 +5203,7 @@ app.post("/api/terminal/sessions", (req, res) => {
   const cols = typeof colsRaw === "number" && Number.isFinite(colsRaw) ? colsRaw : undefined;
   const rows = typeof rowsRaw === "number" && Number.isFinite(rowsRaw) ? rowsRaw : undefined;
   try {
-    const result = createTerminalSession({ projectRoot, cwd, cols, rows });
+    const result = await createTerminalSession({ projectRoot, cwd, cols, rows, backend: appConfig.terminal.ptyBackend });
     if (!result.ok) {
       res.status(400).json({ ok: false, error: result.error });
       return;
@@ -6219,6 +6220,8 @@ app.post("/api/ai/voice", async (req, res) => {
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.resolve(serverDir, "../web");
 
+app.use("/vendor/xterm", express.static(path.resolve(projectRoot, "node_modules/xterm")));
+app.use("/vendor/xterm-addon-fit", express.static(path.resolve(projectRoot, "node_modules/@xterm/addon-fit")));
 app.use("/", express.static(webDir));
 app.get("*", (_req, res) => {
   res.sendFile(path.join(webDir, "index.html"));
