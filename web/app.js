@@ -602,7 +602,11 @@ const refreshLivekitStatus = async () => {
     $("livekit-ws-url").value = result?.livekit?.wsUrl || "";
   }
   if ($("livekit-api-key")) {
-    $("livekit-api-key").value = result?.livekit?.apiKeySet ? $("livekit-api-key").value || "" : "";
+    const input = $("livekit-api-key");
+    if (!input.dataset.userEdited) {
+      input.value = "";
+    }
+    input.placeholder = result?.livekit?.apiKeySet ? "configured (hidden)" : "LIVEKIT_API_KEY";
   }
   if ($("livekit-room-prefix")) {
     $("livekit-room-prefix").value = result?.livekit?.roomPrefix || "milady-cowork";
@@ -2396,6 +2400,13 @@ const bindDashboardEvents = () => {
     }
   });
 
+  $("livekit-api-key")?.addEventListener("input", () => {
+    const input = $("livekit-api-key");
+    if (input) {
+      input.dataset.userEdited = "true";
+    }
+  });
+
   $("livekit-save")?.addEventListener("click", async () => {
     const enabled = Boolean($("livekit-enabled")?.checked);
     const wsUrl = ($("livekit-ws-url")?.value || "").trim();
@@ -2410,6 +2421,10 @@ const bindDashboardEvents = () => {
         roomPrefix: roomPrefix || undefined,
         streamMode,
       });
+      if ($("livekit-api-key")) {
+        $("livekit-api-key").value = "";
+        delete $("livekit-api-key").dataset.userEdited;
+      }
       setText("livekit-output", result);
       await refreshLivekitStatus();
       await refreshCoworkState();

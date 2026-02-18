@@ -155,6 +155,10 @@ Optional LiveKit env (for remote cowork transport):
 - `LIVEKIT_ROOM_PREFIX`
 - `LIVEKIT_STREAM_MODE` (`events_only` or `events_and_frames`)
 
+LiveKit enable policy:
+
+- `POST /api/livekit/config` rejects `enabled=true` unless `wsUrl`, `apiKey`, and `LIVEKIT_API_SECRET` are all configured.
+
 ## Native Apple App (Swift)
 
 ```bash

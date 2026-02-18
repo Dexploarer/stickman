@@ -2654,6 +2654,24 @@ app.post("/api/livekit/config", async (req, res) => {
     patch.streamMode = streamMode as "events_only" | "events_and_frames";
   }
 
+  const currentOnboarding = await getOnboardingState();
+  const previewOnboarding: OnboardingState = {
+    ...currentOnboarding,
+    livekit: {
+      ...currentOnboarding.livekit,
+      ...patch,
+    },
+  };
+  const previewStatus = resolveLivekitStatus(previewOnboarding);
+  if (patch.enabled === true && !previewStatus.configured) {
+    res.status(400).json({
+      ok: false,
+      error: `Cannot enable LiveKit until configured: missing ${previewStatus.missing.join(", ")}.`,
+      livekit: previewStatus,
+    });
+    return;
+  }
+
   const onboarding = await saveOnboardingState({
     livekit: patch,
   } as Parameters<typeof saveOnboardingState>[0]);
