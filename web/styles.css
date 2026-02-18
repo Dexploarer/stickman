@@ -1,0 +1,507 @@
+:root {
+  --bg-0: #f6f3e8;
+  --bg-1: #c9dfdb;
+  --bg-2: #f5be7f;
+  --ink: #0f2429;
+  --ink-soft: #3a5960;
+  --panel: rgba(255, 255, 255, 0.82);
+  --panel-line: rgba(15, 36, 41, 0.14);
+  --accent: #d54e2b;
+  --accent-soft: #f7a543;
+  --chip-bg: rgba(15, 36, 41, 0.08);
+  --mono: "IBM Plex Mono", monospace;
+  --sans: "Space Grotesk", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--sans);
+  color: var(--ink);
+  background: linear-gradient(150deg, var(--bg-0), var(--bg-1));
+  overflow-x: hidden;
+}
+
+html {
+  overflow-x: hidden;
+}
+
+.ambient {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 6% 10%, rgba(245, 190, 127, 0.52), transparent 26%),
+    radial-gradient(circle at 80% 20%, rgba(213, 78, 43, 0.34), transparent 30%),
+    radial-gradient(circle at 72% 80%, rgba(15, 36, 41, 0.16), transparent 42%);
+}
+
+.shell {
+  position: relative;
+  z-index: 1;
+  width: min(1480px, 95vw);
+  margin: 22px auto 36px;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.hero h1 {
+  margin: 0 0 6px;
+  font-size: clamp(1.9rem, 2.9vw, 2.8rem);
+  letter-spacing: 0.02em;
+}
+
+.hero p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  border-radius: 999px;
+  padding: 7px 11px;
+  font-size: 0.8rem;
+  background: var(--chip-bg);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.stack {
+  display: grid;
+  gap: 14px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.panel {
+  backdrop-filter: blur(8px);
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 15px;
+  padding: 14px;
+  box-shadow: 0 10px 30px rgba(15, 36, 41, 0.08);
+  min-width: 0;
+}
+
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 1.02rem;
+}
+
+.panel h3 {
+  margin: 10px 0 8px;
+  font-size: 0.96rem;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.grid-4 {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.sub-panel {
+  border: 1px solid rgba(15, 36, 41, 0.14);
+  border-radius: 10px;
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.65);
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.field-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.toggle-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  flex-wrap: wrap;
+}
+
+label {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  max-width: 100%;
+  min-width: 0;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid rgba(15, 36, 41, 0.2);
+  border-radius: 9px;
+  padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  min-width: 0;
+}
+
+select {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 42px;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(90deg, var(--accent), var(--accent-soft));
+  cursor: pointer;
+}
+
+button.ghost {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 36, 41, 0.18);
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.button-grid {
+  display: grid;
+  gap: 8px;
+}
+
+form {
+  display: grid;
+  gap: 8px;
+}
+
+.summary {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--ink-soft);
+}
+
+.arg-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.arg-row {
+  display: grid;
+  gap: 6px;
+}
+
+.arg-row.bool {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.arg-row.bool label {
+  margin: 0;
+}
+
+.arg-row.bool input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.history-list {
+  display: grid;
+  gap: 7px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.history-item {
+  border: 1px solid rgba(15, 36, 41, 0.14);
+  border-radius: 10px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.history-item button {
+  width: fit-content;
+  padding: 6px 9px;
+  font-size: 0.76rem;
+}
+
+.history-item code {
+  display: block;
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.cowork-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(360px, 1fr) minmax(320px, 420px);
+  gap: 12px;
+}
+
+.cowork-lane {
+  border: 1px solid rgba(15, 36, 41, 0.14);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.cowork-chat-log {
+  border: 1px solid rgba(15, 36, 41, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  max-height: 240px;
+  overflow-y: auto;
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+}
+
+.cowork-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cowork-metric {
+  border: 1px solid rgba(15, 36, 41, 0.14);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.84);
+  padding: 8px;
+  display: grid;
+  gap: 2px;
+}
+
+.cowork-metric strong {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cowork-metric span {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.cowork-quick-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cowork-task-board {
+  display: grid;
+  gap: 8px;
+}
+
+.cowork-task-card {
+  border: 1px solid rgba(15, 36, 41, 0.14);
+  border-radius: 9px;
+  padding: 8px;
+  background: #fff;
+  display: grid;
+  gap: 6px;
+}
+
+.cowork-task-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+
+.cowork-task-status {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(15, 36, 41, 0.1);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.cowork-task-status.status-running {
+  background: rgba(213, 78, 43, 0.16);
+  color: #8f2b10;
+}
+
+.cowork-task-status.status-waiting_approval {
+  background: rgba(247, 165, 67, 0.25);
+  color: #7a4200;
+}
+
+.cowork-task-status.status-completed {
+  background: rgba(47, 143, 92, 0.2);
+  color: #1f6d44;
+}
+
+.cowork-task-status.status-failed {
+  background: rgba(177, 56, 56, 0.2);
+  color: #7b1d1d;
+}
+
+.cowork-task-status.status-cancelled {
+  background: rgba(65, 72, 77, 0.2);
+  color: #2f3f46;
+}
+
+.cowork-task-prompt {
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.cowork-task-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cowork-task-actions button {
+  padding: 5px 8px;
+  font-size: 0.76rem;
+}
+
+#cowork-log-output {
+  max-height: 220px;
+}
+
+.cowork-msg {
+  border: 1px solid rgba(15, 36, 41, 0.12);
+  border-radius: 8px;
+  padding: 7px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  background: #fff;
+}
+
+.cowork-msg strong {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cowork-live-frame {
+  width: 100%;
+  min-height: 360px;
+  border: 1px solid rgba(15, 36, 41, 0.2);
+  border-radius: 10px;
+  background: #10191d;
+}
+
+.cowork-lane .sub-panel pre {
+  max-height: 180px;
+}
+
+pre {
+  margin: 9px 0 0;
+  max-height: 340px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(15, 36, 41, 0.95);
+  color: #dcf5f1;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  line-height: 1.4;
+  max-width: 100%;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.split > section,
+.layout > *,
+.stack > * {
+  min-width: 0;
+}
+
+@media (max-width: 1320px) {
+  .grid-4 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .cowork-grid {
+    grid-template-columns: 1fr;
+  }
+  .cowork-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+  .grid-4 {
+    grid-template-columns: 1fr;
+  }
+  .cowork-metrics {
+    grid-template-columns: 1fr;
+  }
+  .cowork-quick-grid {
+    grid-template-columns: 1fr;
+  }
+}

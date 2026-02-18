@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Live Observer</title>
+    <style>
+      :root {
+        --bg: #0d1418;
+        --panel: #142028;
+        --line: #2a3d47;
+        --text: #d5e7ef;
+        --muted: #7ea0b0;
+        --ok: #45d483;
+        --warn: #f6c85f;
+        --bad: #f56e6e;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      .wrap {
+        padding: 10px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .status {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 12px;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--warn);
+        margin-right: 6px;
+      }
+
+      .online .dot {
+        background: var(--ok);
+      }
+
+      .stream {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        max-height: 340px;
+        overflow: auto;
+        padding: 8px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .frame-view {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0a1014;
+        min-height: 230px;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+      }
+
+      .frame-view img {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+
+      .event {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 6px;
+        background: rgba(0, 0, 0, 0.18);
+        display: grid;
+        gap: 4px;
+      }
+
+      .event-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 11px;
+      }
+
+      .event-type {
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .event-time {
+        color: var(--muted);
+      }
+
+      .event-body {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 12px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 6px;
+      }
+
+      button {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        border-radius: 6px;
+        padding: 6px 8px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <section id="live-status" class="status">
+        <div><span class="dot"></span><span id="live-connection">Connecting...</span></div>
+        <div id="live-count">0 events</div>
+      </section>
+      <section class="actions">
+        <button id="live-clear" type="button">Clear</button>
+        <button id="live-reconnect" type="button">Reconnect</button>
+      </section>
+      <section class="frame-view">
+        <img id="live-frame" alt="Watch frame" />
+      </section>
+      <section id="live-stream" class="stream"></section>
+    </main>
+    <script type="module" src="/live.js"></script>
+  </body>
+</html>

@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Prompt or Die Social Suite</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="ambient"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <h1>Prompt or Die Social Suite</h1>
+          <p>Local-first social automation with onboarding, model orchestration, and workflow execution.</p>
+        </div>
+        <div class="chips">
+          <span class="chip" id="health-chip">API: checking</span>
+          <span class="chip" id="onboarding-chip">Onboarding: checking</span>
+          <button class="ghost" id="refresh-health-btn" type="button">Refresh Status</button>
+        </div>
+      </header>
+
+      <section id="onboarding-root" class="stack">
+        <article class="panel">
+          <h2>Onboarding</h2>
+          <p class="summary">
+            Configure OpenRouter models (text/image/video/embedding/voice), optional fallbacks, X credentials, and persona style before entering dashboard.
+          </p>
+          <form id="onboarding-form">
+            <div class="split">
+              <section>
+                <h3>1) OpenRouter</h3>
+                <label>API key (optional, required for AI features)</label>
+                <input id="onb-api-key" type="password" />
+                <div class="toggle-row">
+                  <label><input id="onb-save-key" type="checkbox" /> save key locally</label>
+                </div>
+                <div class="button-row">
+                  <button type="button" class="ghost" id="onb-test-key">Test Key</button>
+                  <button type="button" class="ghost" id="onb-refresh-models">Fetch Models + Cache</button>
+                </div>
+                <label>Provider mode</label>
+                <select id="onb-provider-mode">
+                  <option value="openrouter">openrouter</option>
+                  <option value="claude_subscription">claude_subscription</option>
+                  <option value="hybrid">hybrid</option>
+                </select>
+                <div class="button-row">
+                  <button type="button" class="ghost" id="onb-claude-login-start">Start Claude CLI Login</button>
+                  <button type="button" class="ghost" id="onb-claude-check">Check Claude Session</button>
+                </div>
+                <pre id="onb-claude-output"></pre>
+                <pre id="onb-key-output"></pre>
+              </section>
+              <section>
+                <h3>2) X Account (Optional)</h3>
+                <p class="summary">Leave username/password empty to validate your existing local browser X session.</p>
+                <label>X username</label>
+                <input id="onb-x-username" type="text" placeholder="your_handle" />
+                <label>X password</label>
+                <input id="onb-x-password" type="password" />
+                <label>X email</label>
+                <input id="onb-x-email" type="text" />
+                <div class="toggle-row">
+                  <label><input id="onb-save-x-password" type="checkbox" /> save password locally</label>
+                </div>
+                <div class="toggle-row">
+                  <label><input id="onb-x-extension-enabled" type="checkbox" checked /> enable x-social extension</label>
+                </div>
+                <label>Extension mode</label>
+                <select id="onb-x-extension-mode">
+                  <option value="manual">manual</option>
+                  <option value="scheduled">scheduled</option>
+                </select>
+                <div class="toggle-row">
+                  <label><input id="onb-x-approval-write" type="checkbox" checked /> require approval for write/auth actions</label>
+                </div>
+                <div class="button-row">
+                  <button type="button" class="ghost" id="onb-test-x-login">Test X Session / Login</button>
+                </div>
+                <pre id="onb-x-output"></pre>
+              </section>
+            </div>
+
+            <h3>3) Code Workspace Extension</h3>
+            <div class="split">
+              <section>
+                <div class="toggle-row">
+                  <label><input id="onb-code-extension-enabled" type="checkbox" checked /> enable code-workspace extension</label>
+                </div>
+                <label>Code extension mode</label>
+                <select id="onb-code-extension-mode">
+                  <option value="manual">manual</option>
+                  <option value="scheduled">scheduled</option>
+                </select>
+              </section>
+              <section>
+                <div class="toggle-row">
+                  <label><input id="onb-code-approval-write" type="checkbox" checked /> require approval for write commands</label>
+                </div>
+                <div class="toggle-row">
+                  <label><input id="onb-code-readonly-auto" type="checkbox" checked /> allow read-only autonomous commands</label>
+                </div>
+                <label>Workspace directory (optional)</label>
+                <input id="onb-code-working-dir" type="text" placeholder="/Users/home/milady-social-suite" />
+              </section>
+            </div>
+
+            <h3>4) Model Defaults and Fallbacks (All Optional)</h3>
+            <div class="grid-4">
+              <div class="sub-panel">
+                <label>Text small</label>
+                <select id="onb-model-text-small"></select>
+                <label>Text large</label>
+                <select id="onb-model-text-large"></select>
+                <label>Text fallback</label>
+                <select id="onb-model-text-fallback"></select>
+              </div>
+              <div class="sub-panel">
+                <label>Image primary</label>
+                <select id="onb-model-image-primary"></select>
+                <label>Image fallback</label>
+                <select id="onb-model-image-fallback"></select>
+              </div>
+              <div class="sub-panel">
+                <label>Video primary</label>
+                <select id="onb-model-video-primary"></select>
+                <label>Video fallback</label>
+                <select id="onb-model-video-fallback"></select>
+              </div>
+              <div class="sub-panel">
+                <label>Embedding primary</label>
+                <select id="onb-model-embedding-primary"></select>
+                <label>Embedding fallback</label>
+                <select id="onb-model-embedding-fallback"></select>
+              </div>
+              <div class="sub-panel">
+                <label>Voice primary</label>
+                <select id="onb-model-voice-primary"></select>
+                <label>Voice fallback</label>
+                <select id="onb-model-voice-fallback"></select>
+              </div>
+            </div>
+
+            <h3>5) Agent Persona</h3>
+            <div class="split">
+              <section>
+                <label>Style prompt</label>
+                <textarea id="onb-style-prompt" rows="3"></textarea>
+                <label>Voice style</label>
+                <input id="onb-voice-style" type="text" placeholder="concise, confident, tactical" />
+              </section>
+              <section>
+                <label>Persona source mode</label>
+                <select id="onb-derive-mode">
+                  <option value="manual">manual</option>
+                  <option value="active_profile">active_profile</option>
+                  <option value="x_username">x_username</option>
+                  <option value="x_url">x_url</option>
+                </select>
+                <label>Source value (username or URL if needed)</label>
+                <input id="onb-source-value" type="text" />
+                <div class="toggle-row">
+                  <label><input id="onb-auto-derive" type="checkbox" /> auto-derive persona</label>
+                </div>
+                <div class="button-row">
+                  <button type="button" class="ghost" id="onb-derive-persona">Derive Persona</button>
+                </div>
+              </section>
+            </div>
+            <pre id="onb-persona-output"></pre>
+
+            <h3>6) Local Key Import (Explicit Permission)</h3>
+            <div class="split">
+              <section>
+                <div class="toggle-row">
+                  <label><input id="onb-import-allow" type="checkbox" /> allow local env/config read for this import</label>
+                </div>
+                <div class="toggle-row">
+                  <label><input id="onb-import-env" type="checkbox" /> include process env (`process.env`)</label>
+                </div>
+                <div class="toggle-row">
+                  <label><input id="onb-import-home" type="checkbox" checked /> include home defaults (`~/.config`, `~/.claude`, `~/.codex`)</label>
+                </div>
+                <div class="toggle-row">
+                  <label><input id="onb-import-shell" type="checkbox" /> include shell profiles (`~/.zshrc`, `~/.bashrc`)</label>
+                </div>
+                <div class="toggle-row">
+                  <label><input id="onb-import-claude" type="checkbox" checked /> include Claude auth/config files</label>
+                </div>
+                <div class="toggle-row">
+                  <label><input id="onb-import-override" type="checkbox" /> override existing onboarding values</label>
+                </div>
+              </section>
+              <section>
+                <label>Additional file paths (one per line, optional)</label>
+                <textarea
+                  id="onb-import-paths"
+                  rows="5"
+                  placeholder="~/.config/prompt-or-die/.env&#10;~/.claude/auth.json"
+                ></textarea>
+                <div class="toggle-row">
+                  <label><input id="onb-import-export" type="checkbox" /> export Prompt or Die env after import</label>
+                </div>
+                <div class="button-row">
+                  <button type="button" class="ghost" id="onb-import-local">Import Local Secrets</button>
+                </div>
+              </section>
+            </div>
+            <pre id="onb-import-output"></pre>
+
+            <h3>7) Prompt or Die Config Export</h3>
+            <div class="split">
+              <section>
+                <div class="toggle-row">
+                  <label><input id="onb-pordie-enabled" type="checkbox" /> enable `.pordie` config folder</label>
+                </div>
+                <label>Config scope</label>
+                <select id="onb-pordie-scope">
+                  <option value="global">global (~/.pordie)</option>
+                  <option value="project">project (./.pordie)</option>
+                </select>
+                <div class="toggle-row">
+                  <label><input id="onb-pordie-auto-export" type="checkbox" /> auto-export on onboarding complete</label>
+                </div>
+                <div class="toggle-row">
+                  <label><input id="onb-pordie-sync-env" type="checkbox" /> also sync values into project `.env`</label>
+                </div>
+                <div class="button-row">
+                  <button type="button" class="ghost" id="onb-export-now">Export Prompt or Die Env Now</button>
+                </div>
+              </section>
+              <section>
+                <p class="summary">
+                  Export target files:
+                </p>
+                <p class="summary" id="onb-pordie-target">- scope: global (~/.pordie)</p>
+                <p class="summary">- `config.json`</p>
+                <p class="summary">- `.env`</p>
+                <p class="summary">- `env.sh` (source in terminal)</p>
+              </section>
+            </div>
+            <pre id="onb-pordie-output"></pre>
+
+            <h3>8) Autonomy Guardrails</h3>
+            <div class="split">
+              <section>
+                <div class="toggle-row">
+                  <label><input id="onb-autonomy-enabled" type="checkbox" /> enable autonomy loop</label>
+                </div>
+                <label>Policy</label>
+                <select id="onb-autonomy-policy">
+                  <option value="mixed_auto">mixed_auto</option>
+                </select>
+              </section>
+              <section>
+                <label>Max actions per cycle</label>
+                <input id="onb-autonomy-max-actions" type="number" min="1" max="30" value="8" />
+                <label>Approval TTL (minutes)</label>
+                <input id="onb-autonomy-approval-ttl" type="number" min="1" max="240" value="30" />
+              </section>
+            </div>
+
+            <h3>9) Agent Skills + Mac Control + Watch</h3>
+            <div class="split">
+              <section>
+                <label>App allowlist</label>
+                <div class="toggle-row">
+                  <label><input id="onb-app-antigravity" type="checkbox" checked /> Antigravity</label>
+                  <label><input id="onb-app-terminal" type="checkbox" checked /> Terminal</label>
+                  <label><input id="onb-app-chrome" type="checkbox" checked /> Chrome</label>
+                </div>
+                <label>Require approval categories</label>
+                <div class="toggle-row">
+                  <label><input id="onb-approval-app-launch" type="checkbox" /> app_launch</label>
+                  <label><input id="onb-approval-terminal-exec" type="checkbox" checked /> terminal_exec</label>
+                  <label><input id="onb-approval-codex-exec" type="checkbox" checked /> codex_exec</label>
+                  <label><input id="onb-approval-browser-external" type="checkbox" checked /> browser_external</label>
+                  <label><input id="onb-approval-write-command" type="checkbox" checked /> write_command</label>
+                </div>
+              </section>
+              <section>
+                <div class="toggle-row">
+                  <label><input id="onb-watch-enabled" type="checkbox" checked /> enable live screenshare watch</label>
+                </div>
+                <label>Watch FPS</label>
+                <input id="onb-watch-fps" type="number" min="1" max="6" value="2" />
+                <label>Capture Scope</label>
+                <input id="onb-watch-scope" type="text" value="agent_surfaces_only" readonly />
+              </section>
+            </div>
+
+            <div class="button-row">
+              <button type="submit">Finish Onboarding and Enter Dashboard</button>
+              <button type="button" class="ghost" id="onb-save-draft">Save Draft</button>
+            </div>
+          </form>
+        </article>
+      </section>
+
+      <section id="dashboard-root" class="layout hidden">
+        <aside class="stack">
+          <article class="panel">
+            <h2>Runtime Controls</h2>
+            <div class="field-grid">
+              <label>Browser</label>
+              <select id="cfg-browser">
+                <option value="chrome">chrome</option>
+                <option value="chromium">chromium</option>
+                <option value="edge">edge</option>
+              </select>
+
+              <label>Compatibility</label>
+              <select id="cfg-compat">
+                <option value="none">none</option>
+                <option value="aisa">aisa</option>
+              </select>
+
+              <label>Chrome profile path</label>
+              <input id="cfg-profile" type="text" placeholder="/Users/.../Chrome" />
+
+              <label>Chrome profile name</label>
+              <input id="cfg-profile-name" type="text" value="Default" />
+
+              <label>Notify webhook</label>
+              <input id="cfg-webhook" type="text" placeholder="https://..." />
+            </div>
+            <div class="toggle-row">
+              <label><input id="cfg-visible" type="checkbox" /> visible browser</label>
+              <label><input id="cfg-notify" type="checkbox" /> local notifications</label>
+            </div>
+            <div class="button-row">
+              <button class="ghost" type="button" id="open-onboarding-btn">Reopen Onboarding</button>
+            </div>
+            <h3>Model Lanes</h3>
+            <pre id="model-lanes-output"></pre>
+            <h3>Heartbeat Agent</h3>
+            <div class="button-row">
+              <button class="ghost" type="button" id="heartbeat-refresh">Refresh Heartbeat</button>
+              <button class="ghost" type="button" id="heartbeat-run-now">Run Heartbeat Now</button>
+            </div>
+            <pre id="heartbeat-output"></pre>
+            <h3>Provider Route</h3>
+            <div class="button-row">
+              <button class="ghost" type="button" id="provider-refresh">Refresh Provider Status</button>
+            </div>
+            <pre id="provider-status-output"></pre>
+            <h3>Extensions</h3>
+            <div class="button-row">
+              <button class="ghost" type="button" id="ext-x-enable">Enable X Extension</button>
+              <button class="ghost" type="button" id="ext-x-disable">Disable X Extension</button>
+              <button class="ghost" type="button" id="ext-code-enable">Enable Code Extension</button>
+              <button class="ghost" type="button" id="ext-code-disable">Disable Code Extension</button>
+              <button class="ghost" type="button" id="ext-refresh">Refresh Extensions</button>
+            </div>
+            <pre id="extensions-output"></pre>
+            <h3>Autonomy + Approvals</h3>
+            <div class="button-row">
+              <button class="ghost" type="button" id="autonomy-enable">Enable</button>
+              <button class="ghost" type="button" id="autonomy-disable">Disable</button>
+              <button class="ghost" type="button" id="autonomy-refresh">Refresh</button>
+            </div>
+            <pre id="autonomy-output"></pre>
+          </article>
+
+          <article class="panel">
+            <h2>Quick Automations</h2>
+            <div class="button-grid">
+              <button type="button" id="qa-session">Session Sanity Check</button>
+              <button type="button" id="qa-discovery">Discovery Sweep</button>
+              <button type="button" id="qa-trendscan">Trend Scan</button>
+            </div>
+            <pre id="quick-output"></pre>
+          </article>
+
+          <article class="panel">
+            <h2>Recent Runs</h2>
+            <div id="history-list" class="history-list"></div>
+          </article>
+
+          <article class="panel">
+            <h2>Approval Queue</h2>
+            <label>Approval ID</label>
+            <input id="approval-id" type="text" placeholder="paste approval id" />
+            <div class="button-row">
+              <button class="ghost" type="button" id="approvals-refresh">Refresh Queue</button>
+              <button class="ghost" type="button" id="approval-approve">Approve</button>
+              <button class="ghost" type="button" id="approval-reject">Reject</button>
+            </div>
+            <pre id="approvals-output"></pre>
+          </article>
+
+          <article class="panel">
+            <h2>Skill Center</h2>
+            <label>Skill</label>
+            <select id="skill-select"></select>
+            <label>Skill args (JSON)</label>
+            <textarea id="skill-args" rows="4" placeholder='{"prompt":"Analyze this repo"}'></textarea>
+            <div class="button-row">
+              <button class="ghost" type="button" id="skills-refresh">Refresh Skills</button>
+              <button class="ghost" type="button" id="skill-enable">Enable Skill</button>
+              <button class="ghost" type="button" id="skill-disable">Disable Skill</button>
+              <button type="button" id="skill-run">Run Skill</button>
+            </div>
+            <pre id="skills-output"></pre>
+          </article>
+
+          <article class="panel">
+            <h2>Task Board</h2>
+            <form id="task-create-form">
+              <label>Prompt / Mission</label>
+              <textarea id="task-prompt" rows="3" placeholder="Open Antigravity and prep a coding mission context."></textarea>
+              <label>Optional skill route</label>
+              <select id="task-skill-select"></select>
+              <label>Depends on Task ID (optional)</label>
+              <input id="task-depends-on" type="text" placeholder="run only after dependency completes" />
+              <button type="submit">Create Task</button>
+            </form>
+            <label>Task ID</label>
+            <input id="task-id" type="text" placeholder="paste task id" />
+            <div class="button-row">
+              <button class="ghost" type="button" id="tasks-refresh">Refresh Tasks</button>
+              <button class="ghost" type="button" id="task-retry">Retry Task</button>
+              <button class="ghost" type="button" id="task-watch">Watch Task</button>
+              <button class="ghost" type="button" id="task-cancel">Cancel Task</button>
+            </div>
+            <pre id="tasks-output"></pre>
+          </article>
+
+          <article class="panel">
+            <h2>Mac Allowlist + Watch</h2>
+            <div class="toggle-row">
+              <label><input id="mac-allow-antigravity" type="checkbox" checked /> allow antigravity</label>
+              <label><input id="mac-allow-terminal" type="checkbox" checked /> allow terminal</label>
+              <label><input id="mac-allow-chrome" type="checkbox" checked /> allow chrome</label>
+            </div>
+            <div class="button-row">
+              <button class="ghost" type="button" id="mac-policy-save">Save Mac Policy</button>
+            </div>
+            <label>App</label>
+            <select id="mac-app-select">
+              <option value="antigravity">antigravity</option>
+              <option value="terminal">terminal</option>
+              <option value="chrome">chrome</option>
+            </select>
+            <label>Optional URL</label>
+            <input id="mac-app-url" type="text" placeholder="antigravity://mission/123 or https://example.com" />
+            <div class="button-row">
+              <button class="ghost" type="button" id="mac-apps-refresh">Refresh Mac Apps</button>
+              <button class="ghost" type="button" id="mac-open-app">Open App</button>
+              <button class="ghost" type="button" id="mac-focus-app">Focus App</button>
+            </div>
+            <label>Watch Source</label>
+            <select id="watch-source-select">
+              <option value="embedded-browser">embedded-browser</option>
+              <option value="antigravity">antigravity</option>
+              <option value="chrome">chrome</option>
+              <option value="terminal">terminal</option>
+            </select>
+            <label>Watch Session ID</label>
+            <input id="watch-session-id" type="text" placeholder="watch session id" />
+            <div class="button-row">
+              <button class="ghost" type="button" id="watch-sources-refresh">Refresh Watch Sources</button>
+              <button class="ghost" type="button" id="watch-start">Start Watch</button>
+              <button class="ghost" type="button" id="watch-stop">Stop Watch</button>
+            </div>
+            <pre id="mac-policy-output"></pre>
+          </article>
+        </aside>
+
+        <section class="stack">
+          <article class="panel">
+            <h2>Agentic Co-Workspace</h2>
+            <p class="summary">
+              Milady-style three-lane cowork surface: conversations, agent chat/task dispatch, and live observer stream.
+            </p>
+            <div class="cowork-grid">
+              <section class="cowork-lane">
+                <h3>Conversations</h3>
+                <div id="cowork-conversations" class="history-list"></div>
+              </section>
+              <section class="cowork-lane">
+                <h3>Agent Chat + Task Dispatch</h3>
+                <div id="cowork-metrics" class="cowork-metrics"></div>
+                <div id="cowork-chat-log" class="cowork-chat-log"></div>
+                <form id="cowork-form">
+                  <label>Task for Agent</label>
+                  <textarea id="cowork-task-input" rows="4" placeholder="Investigate trend shifts and propose a 3-step action plan." required></textarea>
+                  <div class="toggle-row">
+                    <label><input id="cowork-auto-plan" type="checkbox" checked /> also generate automation plan</label>
+                    <label><input id="cowork-start-task" type="checkbox" checked /> queue as background task</label>
+                  </div>
+                  <div class="button-row">
+                    <button type="submit">Send Task</button>
+                    <button class="ghost" type="button" id="cowork-clear-chat">Clear Chat</button>
+                  </div>
+                </form>
+                <pre id="cowork-output"></pre>
+                <pre id="cowork-state-output"></pre>
+
+                <div class="sub-panel">
+                  <h3>Quick Agent Skills</h3>
+                  <p class="summary">Launch core agent actions with one click while keeping approval controls intact.</p>
+                  <label>Quick URL (for browser action)</label>
+                  <input id="cowork-quick-url" type="text" placeholder="https://x.com/home" />
+                  <label>Quick Prompt (for Codex/Claude actions)</label>
+                  <input id="cowork-quick-prompt" type="text" placeholder="Review this repo and propose next coding steps." />
+                  <div class="button-grid cowork-quick-grid">
+                    <button class="ghost" type="button" id="cowork-quick-antigravity">Open Antigravity</button>
+                    <button class="ghost" type="button" id="cowork-quick-terminal">Open Terminal</button>
+                    <button class="ghost" type="button" id="cowork-quick-chrome">Open Chrome</button>
+                    <button class="ghost" type="button" id="cowork-quick-codex">Run Codex</button>
+                    <button class="ghost" type="button" id="cowork-quick-claude">Run Claude</button>
+                  </div>
+                </div>
+
+                <div class="sub-panel">
+                  <h3>Mission Templates</h3>
+                  <p class="summary">Create full social/coding mission chains in one click.</p>
+                  <label>Mission Template</label>
+                  <select id="cowork-mission-select"></select>
+                  <label>Prompt override (optional)</label>
+                  <input id="cowork-mission-prompt" type="text" placeholder="Override mission objective..." />
+                  <label>Social query override (optional)</label>
+                  <input id="cowork-mission-query" type="text" placeholder="AI agents trend" />
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="cowork-mission-run">Run Selected Mission</button>
+                    <button class="ghost" type="button" id="cowork-mission-social">Run Social Mission</button>
+                    <button class="ghost" type="button" id="cowork-mission-coding">Run Coding Mission</button>
+                  </div>
+                </div>
+
+                <div class="sub-panel">
+                  <h3>Active Task Board</h3>
+                  <div id="cowork-task-board" class="cowork-task-board"></div>
+                </div>
+
+                <div class="sub-panel">
+                  <h3>Task Log Tail</h3>
+                  <label>Task ID</label>
+                  <select id="cowork-log-task-select"></select>
+                  <label>Log Type Filter</label>
+                  <select id="cowork-log-type-filter">
+                    <option value="">all</option>
+                    <option value="task_state">task_state</option>
+                    <option value="skill_action">skill_action</option>
+                    <option value="stdout_chunk">stdout_chunk</option>
+                    <option value="frame">frame</option>
+                    <option value="error">error</option>
+                  </select>
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="cowork-log-refresh">Refresh Logs</button>
+                  </div>
+                  <pre id="cowork-log-output"></pre>
+                </div>
+
+                <div class="sub-panel">
+                  <h3>Coding Ops</h3>
+                  <p class="summary">Read-only commands can run immediately. Write commands are approval-gated.</p>
+                  <form id="code-plan-form">
+                    <label>Coding task</label>
+                    <textarea id="code-plan-task" rows="3" placeholder="Refactor provider switching to reduce duplicated route logic." required></textarea>
+                    <button type="submit">Generate Coding Plan</button>
+                  </form>
+                  <pre id="code-plan-output"></pre>
+
+                  <form id="code-exec-form">
+                    <label>Workspace command</label>
+                    <input id="code-exec-command" type="text" placeholder="rg -n &quot;provider mode&quot; src" required />
+                    <label>Working directory (optional)</label>
+                    <input id="code-exec-cwd" type="text" placeholder="src" />
+                    <button type="submit">Run Command</button>
+                  </form>
+                  <pre id="code-exec-output"></pre>
+
+                  <label>Code approval ID</label>
+                  <input id="code-approval-id" type="text" placeholder="paste code approval id" />
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="code-status-refresh">Refresh Code Status</button>
+                    <button class="ghost" type="button" id="code-approvals-refresh">Refresh Code Approvals</button>
+                    <button class="ghost" type="button" id="code-approval-approve">Approve Code Command</button>
+                    <button class="ghost" type="button" id="code-approval-reject">Reject Code Command</button>
+                  </div>
+                  <pre id="code-status-output"></pre>
+                  <pre id="code-approvals-output"></pre>
+                </div>
+              </section>
+              <section class="cowork-lane">
+                <h3>Live Agent Observer</h3>
+                <div class="button-row">
+                  <button class="ghost" type="button" id="cowork-live-refresh">Refresh Stream</button>
+                </div>
+                <iframe
+                  id="cowork-live-iframe"
+                  class="cowork-live-frame"
+                  title="Agent Live Observer"
+                  src="/live.html"
+                ></iframe>
+              </section>
+            </div>
+          </article>
+
+          <article class="panel split">
+            <section>
+              <h2>Login Refresh</h2>
+              <form id="login-form">
+                <label>Username</label>
+                <input id="login-username" type="text" placeholder="your_handle" required />
+                <label>Password</label>
+                <input id="login-password" type="password" required />
+                <label>Email (optional fallback)</label>
+                <input id="login-email" type="text" />
+                <button type="submit">Refresh Login</button>
+              </form>
+              <pre id="login-output"></pre>
+            </section>
+            <section>
+              <h2>Tweet Composer</h2>
+              <form id="tweet-form">
+                <label>Draft</label>
+                <textarea id="tweet-text" rows="5" placeholder="Operating from Prompt or Die..." required></textarea>
+                <label>Style prompt (for AI draft assist)</label>
+                <input id="tweet-style" type="text" placeholder="confident, cryptic, short" />
+                <div class="button-row">
+                  <button type="button" class="ghost" id="tweet-generate">Generate Draft</button>
+                  <button type="submit">Post Tweet</button>
+                </div>
+              </form>
+              <pre id="tweet-output"></pre>
+            </section>
+          </article>
+
+          <article class="panel">
+            <h2>Command Studio</h2>
+            <form id="endpoint-form">
+              <label>Search endpoint</label>
+              <input id="endpoint-filter" type="text" placeholder="search, stream, spaces, user..." />
+              <label>Endpoint</label>
+              <select id="endpoint-select"></select>
+              <p class="summary" id="endpoint-summary"></p>
+              <div id="endpoint-args" class="arg-grid"></div>
+              <button type="submit">Run Endpoint</button>
+            </form>
+            <pre id="endpoint-output"></pre>
+          </article>
+
+          <article class="panel split">
+            <section>
+              <h2>AI Workflow Planner</h2>
+              <form id="plan-form">
+                <label>Goal</label>
+                <textarea id="plan-goal" rows="3" placeholder="Monitor trends and capture relevant live posts about AI agents" required></textarea>
+                <label>Context (optional)</label>
+                <textarea id="plan-context" rows="2"></textarea>
+                <label>Text model preset</label>
+                <select id="plan-model-select"></select>
+                <label>Model override (optional)</label>
+                <input id="plan-model" type="text" placeholder="openai/gpt-4.1-mini" />
+                <div class="button-row">
+                  <button type="submit">Generate Plan</button>
+                  <button id="plan-import" type="button" class="ghost">Import Into Runner</button>
+                </div>
+              </form>
+              <pre id="plan-output"></pre>
+            </section>
+
+            <section>
+              <h2>Workflow Runner</h2>
+              <label>Workflow JSON</label>
+              <textarea id="workflow-json" rows="14">
+{
+  "stopOnError": true,
+  "steps": [
+    { "endpoint": "get_my_x_account_detail_v3", "args": {}, "waitMs": 0 },
+    { "endpoint": "trends", "args": { "limit": 10 }, "waitMs": 400 },
+    { "endpoint": "stream_status", "args": {}, "waitMs": 0 }
+  ]
+}
+              </textarea>
+              <div class="button-row">
+                <button type="button" id="workflow-run">Run Workflow</button>
+                <button type="button" id="workflow-format" class="ghost">Format JSON</button>
+                <button type="button" id="workflow-clear" class="ghost">Clear</button>
+              </div>
+              <pre id="workflow-output"></pre>
+            </section>
+          </article>
+
+          <article class="panel split">
+            <section>
+              <h2>AI Chat Copilot</h2>
+              <form id="ai-form">
+                <label>Text model preset</label>
+                <select id="ai-model-select"></select>
+                <label>Model (optional)</label>
+                <input id="ai-model" type="text" />
+                <label>System prompt (optional)</label>
+                <textarea id="ai-system" rows="2"></textarea>
+                <label>Prompt</label>
+                <textarea id="ai-prompt" rows="4" required></textarea>
+                <button type="submit">Run AI</button>
+              </form>
+              <pre id="ai-output"></pre>
+            </section>
+            <section>
+              <h2>Activity Log</h2>
+              <pre id="activity-log"></pre>
+            </section>
+          </article>
+
+          <article class="panel split">
+            <section>
+              <h2>AI Image Copilot</h2>
+              <form id="ai-image-form">
+                <label>Image model preset</label>
+                <select id="ai-image-model-select"></select>
+                <label>Model override (optional)</label>
+                <input id="ai-image-model" type="text" />
+                <label>Prompt</label>
+                <textarea id="ai-image-prompt" rows="3" placeholder="Generate a visual concept for tonight's X post..." required></textarea>
+                <button type="submit">Generate Image</button>
+              </form>
+              <pre id="ai-image-output"></pre>
+            </section>
+            <section>
+              <h2>AI Video Copilot</h2>
+              <form id="ai-video-form">
+                <label>Video model preset</label>
+                <select id="ai-video-model-select"></select>
+                <label>Model override (optional)</label>
+                <input id="ai-video-model" type="text" />
+                <label>Video URL or Data URL</label>
+                <input id="ai-video-url" type="text" placeholder="https://... or data:video/mp4;base64,..." />
+                <label>Prompt</label>
+                <textarea id="ai-video-prompt" rows="3" placeholder="Summarize this video and output 3 actionable X angles." required></textarea>
+                <button type="submit">Analyze Video</button>
+              </form>
+              <pre id="ai-video-output"></pre>
+            </section>
+          </article>
+
+          <article class="panel split">
+            <section>
+              <h2>X Algorithm OS Lab</h2>
+              <form id="x-algo-form">
+                <label>Target handle (optional, empty = active profile)</label>
+                <input id="x-algo-handle" type="text" placeholder="@handle or x.com/handle" />
+                <label>Draft to score/optimize</label>
+                <textarea id="x-algo-draft" rows="4" placeholder="Paste draft to simulate rank potential..." required></textarea>
+                <label>Style hint (optional)</label>
+                <input id="x-algo-style" type="text" placeholder="concise, high-signal, conversational" />
+                <label>Suggested query from algorithm intel</label>
+                <select id="x-algo-query-select"></select>
+                <div class="toggle-row">
+                  <label><input id="x-algo-auto-run" type="checkbox" checked /> auto-run top suggested workflow after intel</label>
+                </div>
+                <div class="button-row">
+                  <button type="submit">Run X Algorithm Intel</button>
+                  <button type="button" class="ghost" id="x-algo-apply-best">Use Best Draft in Composer</button>
+                  <button type="button" class="ghost" id="x-algo-run-suggested">Run Suggested Query Workflow</button>
+                </div>
+              </form>
+              <pre id="x-algo-output"></pre>
+            </section>
+            <section>
+              <h2>Open-Source Ranking Weights</h2>
+              <pre id="x-algo-weights"></pre>
+            </section>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
