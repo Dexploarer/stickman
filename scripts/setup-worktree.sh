@@ -75,13 +75,14 @@ if [ ! -w "$(dirname "$DB_PATH")" ]; then
 else
   if ! DB_PATH="$DB_PATH" bun -e '\
 const dbPath = process.env.DB_PATH; \
-const BetterSqlite3 = require(\"better-sqlite3\"); \
-const db = new BetterSqlite3(dbPath); \
-db.pragma(\"journal_mode = WAL\"); \
+const { Database } = require(\"bun:sqlite\"); \
+const db = new Database(dbPath); \
+db.exec(\"PRAGMA journal_mode=WAL;\"); \
 db.exec(\"CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL)\"); \
 const now = new Date().toISOString(); \
 db.prepare(\"INSERT INTO meta(key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at\").run(\"bootstrap_check\", \"ok\", now); \
-const mode = String(db.pragma(\"journal_mode\", { simple: true }) || \"\").toUpperCase(); \
+const row = db.prepare(\"PRAGMA journal_mode\").get(); \
+const mode = String(row && row.journal_mode || \"\").toUpperCase(); \
 if (mode !== \"WAL\") { \
   console.error(`Expected WAL mode, got ${mode || \"unknown\"}`); \
   process.exit(1); \

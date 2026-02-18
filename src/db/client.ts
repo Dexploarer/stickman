@@ -1,13 +1,40 @@
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-
-import BetterSqlite3 from "better-sqlite3";
 
 import { appConfig } from "../config.js";
 import type { LocalDatabaseConfig } from "../types.js";
 
-const createDatabase = (targetPath: string) => new BetterSqlite3(targetPath);
-type SqliteDatabase = ReturnType<typeof createDatabase>;
+export interface SqliteRunResult {
+  changes: number;
+  lastInsertRowid?: number | bigint;
+}
+
+export interface SqliteStatement {
+  run: (...params: unknown[]) => SqliteRunResult;
+  get: (...params: unknown[]) => unknown;
+  all: (...params: unknown[]) => unknown[];
+}
+
+export interface SqliteDatabase {
+  exec: (sql: string) => void;
+  prepare: (sql: string) => SqliteStatement;
+  close: () => void;
+}
+
+const require = createRequire(import.meta.url);
+
+const isBunRuntime = (): boolean => typeof (globalThis as unknown as { Bun?: unknown }).Bun !== "undefined";
+
+const createDatabase = (targetPath: string): SqliteDatabase => {
+  if (isBunRuntime()) {
+    const { Database } = require("bun:sqlite") as { Database: new (path: string) => SqliteDatabase };
+    return new Database(targetPath);
+  }
+
+  const BetterSqlite3 = require("better-sqlite3") as unknown as new (path: string) => SqliteDatabase;
+  return new BetterSqlite3(targetPath);
+};
 
 let db: SqliteDatabase | null = null;
 let dbPathOverride: string | null = null;
@@ -36,9 +63,9 @@ export const getDatabase = (): SqliteDatabase => {
   const targetPath = resolveDbPath();
   mkdirSync(path.dirname(targetPath), { recursive: true });
   db = createDatabase(targetPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.pragma("foreign_keys = ON");
+  db.exec("PRAGMA journal_mode=WAL;");
+  db.exec("PRAGMA synchronous=NORMAL;");
+  db.exec("PRAGMA foreign_keys=ON;");
   return db;
 };
 
