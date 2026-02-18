@@ -81,6 +81,7 @@ req health GET /api/health 200
 req providers_status GET /api/providers/status 200
 req integrations_status GET /api/integrations/status 200
 req integrations_actions_catalog GET /api/integrations/actions/catalog 200
+req integrations_actions_history GET /api/integrations/actions/history 200
 req integrations_action_dry_run POST /api/integrations/actions 200 '{"mode":"dry_run","actionId":"prepare_observer_workspace"}'
 req integrations_action_execute_missing_token POST /api/integrations/actions 409 '{"mode":"execute","actionId":"prepare_observer_workspace"}'
 req integrations_subscriptions_list GET /api/integrations/subscriptions 200

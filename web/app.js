@@ -27,6 +27,7 @@ const state = {
   livekitStatus: null,
   integrations: null,
   integrationActionCatalog: [],
+  integrationActionHistory: [],
   integrationSubscribers: [],
   integrationBridgeStatus: null,
 };
@@ -350,6 +351,13 @@ const refreshIntegrationActionCatalog = async () => {
   return result;
 };
 
+const refreshIntegrationActionHistory = async () => {
+  const result = await apiGet("/api/integrations/actions/history?limit=80");
+  state.integrationActionHistory = Array.isArray(result?.history) ? result.history : [];
+  setText("integration-actions-history-output", result);
+  return result;
+};
+
 const refreshIntegrationSubscribers = async () => {
   const result = await apiGet("/api/integrations/subscriptions");
   state.integrationSubscribers = Array.isArray(result?.subscriptions) ? result.subscriptions : [];
@@ -398,6 +406,7 @@ const runIntegrationActionFlow = async (mode) => {
     setText("integration-action-output", result);
     await refreshIntegrations();
     await refreshIntegrationBridgeStatus();
+    await refreshIntegrationActionHistory();
     return result;
   }
   const confirmToken = ($("integration-confirm-token")?.value || "").trim();
@@ -412,6 +421,7 @@ const runIntegrationActionFlow = async (mode) => {
   await refreshMacApps();
   await refreshCoworkState();
   await refreshIntegrationBridgeStatus();
+  await refreshIntegrationActionHistory();
   return result;
 };
 
@@ -2311,8 +2321,17 @@ const bindDashboardEvents = () => {
   $("integration-actions-refresh")?.addEventListener("click", async () => {
     try {
       await refreshIntegrationActionCatalog();
+      await refreshIntegrationActionHistory();
     } catch (error) {
       setText("integration-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("integration-actions-history-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshIntegrationActionHistory();
+    } catch (error) {
+      setText("integration-actions-history-output", error instanceof Error ? error.message : String(error));
     }
   });
 
@@ -3427,6 +3446,7 @@ const boot = async () => {
   await refreshLivekitStatus();
   await refreshIntegrations();
   await refreshIntegrationActionCatalog();
+  await refreshIntegrationActionHistory();
   await refreshIntegrationSubscribers();
   await refreshIntegrationBridgeStatus();
   await refreshTaskLogTail();
@@ -3444,6 +3464,7 @@ const boot = async () => {
         refreshTaskLogTail(),
         refreshIntegrations(),
         refreshIntegrationBridgeStatus(),
+        refreshIntegrationActionHistory(),
       ]);
     } catch {
       // keep dashboard responsive even if one refresh cycle fails

@@ -238,6 +238,7 @@ This creates and launches:
 - `POST /api/livekit/token/control`
 - `GET /api/integrations/status`
 - `GET /api/integrations/actions/catalog`
+- `GET /api/integrations/actions/history`
 - `POST /api/integrations/actions`
 - `GET /api/integrations/subscriptions`
 - `POST /api/integrations/subscriptions`

@@ -173,6 +173,32 @@ const livekitControlPublisher = new LivekitControlPublisher(() => ({
   ...livekitBridgeConfigState,
 }));
 integrationBridge = new IntegrationBridge(integrationSubscriberStore, livekitControlPublisher);
+interface IntegrationActionHistoryItem {
+  id: string;
+  at: string;
+  mode: "dry_run" | "execute";
+  actionId: string | null;
+  steps: string[];
+  status: "planned" | "confirm_required" | "completed" | "failed";
+  code?: string;
+  error?: string;
+  trace: Array<{
+    index: number;
+    stepId: string;
+    status: string;
+    code?: string;
+    message?: string;
+  }>;
+}
+const integrationActionHistory: IntegrationActionHistoryItem[] = [];
+const MAX_INTEGRATION_ACTION_HISTORY = 200;
+
+const recordIntegrationActionHistory = (entry: IntegrationActionHistoryItem) => {
+  integrationActionHistory.unshift(entry);
+  if (integrationActionHistory.length > MAX_INTEGRATION_ACTION_HISTORY) {
+    integrationActionHistory.splice(MAX_INTEGRATION_ACTION_HISTORY);
+  }
+};
 
 const parseLiveEventFilter = (input: {
   watchSessionId?: string | null;
@@ -3758,9 +3784,19 @@ app.get("/api/integrations/actions/catalog", (_req, res) => {
   });
 });
 
+app.get("/api/integrations/actions/history", (_req, res) => {
+  const limitRaw = Number(typeof _req.query.limit === "string" ? _req.query.limit : undefined);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.floor(limitRaw))) : 60;
+  res.json({
+    ok: true,
+    history: integrationActionHistory.slice(0, limit),
+  });
+});
+
 app.post("/api/integrations/actions", async (req, res) => {
   const body = (req.body || {}) as Partial<IntegrationActionRequest>;
   const mode = body.mode === "execute" ? "execute" : body.mode === "dry_run" ? "dry_run" : null;
+  const actionRunId = randomUUID();
   if (!mode) {
     res.status(400).json({
       ok: false,
@@ -3795,9 +3831,25 @@ app.post("/api/integrations/actions", async (req, res) => {
       steps: planned.plan.steps.map((step) => step.id),
       confirmTokenExpiresAt: confirm.expiresAt,
     });
+    recordIntegrationActionHistory({
+      id: actionRunId,
+      at: new Date().toISOString(),
+      mode: "dry_run",
+      actionId: planned.plan.actionId || null,
+      steps: planned.plan.steps.map((step) => step.id),
+      status: "planned",
+      trace: plannedTrace.map((step) => ({
+        index: step.index,
+        stepId: step.stepId,
+        status: step.status,
+        code: step.code,
+        message: step.message,
+      })),
+    });
     res.json({
       ok: true,
       mode,
+      actionRunId,
       actionId: planned.plan.actionId || null,
       trace: plannedTrace,
       confirmToken: confirm.token,
@@ -3808,9 +3860,27 @@ app.post("/api/integrations/actions", async (req, res) => {
 
   const tokenCheck = consumeConfirmToken(String(body.confirmToken || ""), payloadHash);
   if (!tokenCheck.ok) {
+    recordIntegrationActionHistory({
+      id: actionRunId,
+      at: new Date().toISOString(),
+      mode: "execute",
+      actionId: planned.plan.actionId || null,
+      steps: planned.plan.steps.map((step) => step.id),
+      status: "confirm_required",
+      code: "confirm_required",
+      error: tokenCheck.code,
+      trace: plannedTrace.map((step) => ({
+        index: step.index,
+        stepId: step.stepId,
+        status: step.status,
+        code: step.code,
+        message: step.message,
+      })),
+    });
     res.status(409).json({
       ok: false,
       mode,
+      actionRunId,
       actionId: planned.plan.actionId || null,
       code: "confirm_required",
       error: `A valid confirmToken from dry_run is required (${tokenCheck.code}).`,
@@ -3841,6 +3911,23 @@ app.post("/api/integrations/actions", async (req, res) => {
     });
   }
   if (!result.ok) {
+    recordIntegrationActionHistory({
+      id: actionRunId,
+      at: new Date().toISOString(),
+      mode: "execute",
+      actionId: planned.plan.actionId || null,
+      steps: planned.plan.steps.map((step) => step.id),
+      status: "failed",
+      code: result.code || "execution_failed",
+      error: result.error || "integration action failed",
+      trace: result.trace.map((step) => ({
+        index: step.index,
+        stepId: step.stepId,
+        status: step.status,
+        code: step.code,
+        message: step.message,
+      })),
+    });
     emitLiveEvent("integration_action_failed", {
       actionId: planned.plan.actionId || null,
       code: result.code || "execution_failed",
@@ -3851,6 +3938,7 @@ app.post("/api/integrations/actions", async (req, res) => {
     res.status(statusCode).json({
       ok: false,
       mode,
+      actionRunId,
       actionId: planned.plan.actionId || null,
       code: result.code || "execution_failed",
       error: result.error || "integration action failed",
@@ -3863,10 +3951,26 @@ app.post("/api/integrations/actions", async (req, res) => {
     actionId: planned.plan.actionId || null,
     trace: result.trace,
   });
+  recordIntegrationActionHistory({
+    id: actionRunId,
+    at: new Date().toISOString(),
+    mode: "execute",
+    actionId: planned.plan.actionId || null,
+    steps: planned.plan.steps.map((step) => step.id),
+    status: "completed",
+    trace: result.trace.map((step) => ({
+      index: step.index,
+      stepId: step.stepId,
+      status: step.status,
+      code: step.code,
+      message: step.message,
+    })),
+  });
   void emitIntegrationReadinessChanged("integration_action_completed");
   res.json({
     ok: true,
     mode,
+    actionRunId,
     actionId: planned.plan.actionId || null,
     trace: result.trace,
   });

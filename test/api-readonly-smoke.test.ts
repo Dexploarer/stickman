@@ -108,6 +108,7 @@ describe("api read-only smoke", () => {
     const provider = await apiGet("/api/providers/status");
     const integrations = await apiGet("/api/integrations/status");
     const integrationCatalog = await apiGet("/api/integrations/actions/catalog");
+    const integrationHistory = await apiGet("/api/integrations/actions/history");
     const integrationSubscribers = await apiGet("/api/integrations/subscriptions");
     const integrationBridge = await apiGet("/api/integrations/bridge/status");
     const extensions = await apiGet("/api/extensions");
@@ -119,6 +120,7 @@ describe("api read-only smoke", () => {
     expect(provider.status).toBe(200);
     expect(integrations.status).toBe(200);
     expect(integrationCatalog.status).toBe(200);
+    expect(integrationHistory.status).toBe(200);
     expect(integrationSubscribers.status).toBe(200);
     expect(integrationBridge.status).toBe(200);
     expect(extensions.status).toBe(200);
@@ -131,6 +133,7 @@ describe("api read-only smoke", () => {
     expect((integrations.body as Record<string, unknown>).ok).toBe(true);
     expect(typeof (integrations.body as Record<string, unknown>).integrations).toBe("object");
     expect(Array.isArray((integrationCatalog.body as Record<string, unknown>).actions)).toBe(true);
+    expect(Array.isArray((integrationHistory.body as Record<string, unknown>).history)).toBe(true);
     expect(Array.isArray((integrationSubscribers.body as Record<string, unknown>).subscriptions)).toBe(true);
     expect(typeof (integrationBridge.body as Record<string, unknown>).bridge).toBe("object");
     expect((extensions.body as Record<string, unknown>).ok).toBe(true);
