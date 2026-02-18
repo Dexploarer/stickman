@@ -1,8 +1,15 @@
-import { defaultOnboardingState, onboardingStatePath } from "./config.js";
-import { readJsonFile, writeJsonFile } from "./state/store.js";
+import { defaultOnboardingState } from "./config.js";
+import { readOnboardingStateRecord, saveOnboardingStateRecord } from "./db/repositories/onboarding-repo.js";
 import type { OnboardingState } from "./types.js";
 
 const mergeOnboarding = (base: OnboardingState, patch: Partial<OnboardingState>): OnboardingState => {
+  const mergedStorage = patch.storage || base.storage
+    ? {
+        engine: "sqlite" as const,
+        ...(base.storage || {}),
+        ...(patch.storage || {}),
+      }
+    : undefined;
   return {
     ...base,
     ...patch,
@@ -76,12 +83,13 @@ const mergeOnboarding = (base: OnboardingState, patch: Partial<OnboardingState>)
       ...base.pordie,
       ...(patch.pordie || {}),
     },
+    ...(mergedStorage ? { storage: mergedStorage } : {}),
   };
 };
 
 export const getOnboardingState = async (): Promise<OnboardingState> => {
   const defaults = defaultOnboardingState();
-  const loaded = await readJsonFile<OnboardingState>(onboardingStatePath, defaults);
+  const loaded = readOnboardingStateRecord();
   return mergeOnboarding(defaults, loaded);
 };
 
@@ -89,7 +97,7 @@ export const saveOnboardingState = async (next: Partial<OnboardingState>): Promi
   const current = await getOnboardingState();
   const merged = mergeOnboarding(current, next);
   merged.updatedAt = new Date().toISOString();
-  await writeJsonFile(onboardingStatePath, merged);
+  saveOnboardingStateRecord(merged);
   return merged;
 };
 

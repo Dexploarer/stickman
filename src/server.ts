@@ -29,6 +29,8 @@ import {
 import { detectClaudeSession, startClaudeCliLogin } from "./ai/claude-bridge.js";
 import { appConfig, buildDefaultXGlobalArgs, integrationBridgeStatePath, modelCachePath, projectRoot, resolvePordiePaths, resolvePordieScope } from "./config.js";
 import { assessWorkspaceCommand, getWorkspaceSession, listWorkspaceSessions, runWorkspaceCommand } from "./code/workspace.js";
+import { insertIntegrationActionHistory, listIntegrationActionHistory, type IntegrationActionHistoryRecord } from "./db/repositories/integration-actions-repo.js";
+import { ensureDatabaseReady } from "./db/migrate.js";
 import { buildIntegrationActionPlan, buildPlannedTrace, executeIntegrationActionPlan } from "./integrations/actions.js";
 import { integrationCatalogSteps, integrationRunbooks } from "./integrations/catalog.js";
 import { buildConfirmPayloadHash, consumeConfirmToken, issueConfirmToken } from "./integrations/confirm-tokens.js";
@@ -65,6 +67,14 @@ const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
+
+try {
+  ensureDatabaseReady();
+} catch (error) {
+  // eslint-disable-next-line no-console
+  console.error("Failed to initialize SQLite database:", error);
+  throw error;
+}
 
 const resolveObject = (value: unknown): XArgMap => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -173,31 +183,10 @@ const livekitControlPublisher = new LivekitControlPublisher(() => ({
   ...livekitBridgeConfigState,
 }));
 integrationBridge = new IntegrationBridge(integrationSubscriberStore, livekitControlPublisher);
-interface IntegrationActionHistoryItem {
-  id: string;
-  at: string;
-  mode: "dry_run" | "execute";
-  actionId: string | null;
-  steps: string[];
-  status: "planned" | "confirm_required" | "completed" | "failed";
-  code?: string;
-  error?: string;
-  trace: Array<{
-    index: number;
-    stepId: string;
-    status: string;
-    code?: string;
-    message?: string;
-  }>;
-}
-const integrationActionHistory: IntegrationActionHistoryItem[] = [];
-const MAX_INTEGRATION_ACTION_HISTORY = 200;
+type IntegrationActionHistoryItem = IntegrationActionHistoryRecord;
 
 const recordIntegrationActionHistory = (entry: IntegrationActionHistoryItem) => {
-  integrationActionHistory.unshift(entry);
-  if (integrationActionHistory.length > MAX_INTEGRATION_ACTION_HISTORY) {
-    integrationActionHistory.splice(MAX_INTEGRATION_ACTION_HISTORY);
-  }
+  insertIntegrationActionHistory(entry);
 };
 
 const parseLiveEventFilter = (input: {
@@ -3789,7 +3778,7 @@ app.get("/api/integrations/actions/history", (_req, res) => {
   const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.floor(limitRaw))) : 60;
   res.json({
     ok: true,
-    history: integrationActionHistory.slice(0, limit),
+    history: listIntegrationActionHistory(limit),
   });
 });
 
@@ -4862,6 +4851,74 @@ app.get("/api/code/sessions/:id", (req, res) => {
   res.json({
     ok: true,
     session,
+  });
+});
+
+const respondTerminalPtyDisabled = (res: Response) => {
+  res.status(423).json({
+    ok: false,
+    code: "terminal_pty_disabled",
+    error: "Interactive PTY terminal is disabled. Set TERMINAL_PTY_ENABLED=true to enable.",
+  });
+};
+
+const respondTerminalPtyUnimplemented = (res: Response) => {
+  res.status(501).json({
+    ok: false,
+    code: "terminal_pty_unimplemented",
+    error: "PTY terminal mode is not implemented in this build yet.",
+  });
+};
+
+app.post("/api/terminal/sessions", (_req, res) => {
+  if (!appConfig.terminal.ptyEnabled) {
+    respondTerminalPtyDisabled(res);
+    return;
+  }
+  respondTerminalPtyUnimplemented(res);
+});
+
+app.get("/api/terminal/sessions", (_req, res) => {
+  if (!appConfig.terminal.ptyEnabled) {
+    respondTerminalPtyDisabled(res);
+    return;
+  }
+  respondTerminalPtyUnimplemented(res);
+});
+
+app.post("/api/terminal/sessions/:id/input", (_req, res) => {
+  if (!appConfig.terminal.ptyEnabled) {
+    respondTerminalPtyDisabled(res);
+    return;
+  }
+  respondTerminalPtyUnimplemented(res);
+});
+
+app.post("/api/terminal/sessions/:id/resize", (_req, res) => {
+  if (!appConfig.terminal.ptyEnabled) {
+    respondTerminalPtyDisabled(res);
+    return;
+  }
+  respondTerminalPtyUnimplemented(res);
+});
+
+app.post("/api/terminal/sessions/:id/close", (_req, res) => {
+  if (!appConfig.terminal.ptyEnabled) {
+    respondTerminalPtyDisabled(res);
+    return;
+  }
+  respondTerminalPtyUnimplemented(res);
+});
+
+app.get("/api/terminal/ws", (_req, res) => {
+  if (!appConfig.terminal.ptyEnabled) {
+    respondTerminalPtyDisabled(res);
+    return;
+  }
+  res.status(426).json({
+    ok: false,
+    code: "terminal_pty_ws_upgrade_required",
+    error: "WebSocket upgrade required for PTY terminal.",
   });
 });
 

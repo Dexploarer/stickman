@@ -336,6 +336,31 @@ form {
   gap: 8px;
 }
 
+.cowork-shell-banner {
+  border: 1px solid rgba(15, 36, 41, 0.2);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #10191d 0%, #15252c 100%);
+  color: #dcf5f1;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  padding: 9px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cowork-command-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cowork-command-btn {
+  font-family: var(--mono);
+  font-size: 0.73rem;
+  padding: 5px 8px;
+}
+
 .cowork-chat-log {
   border: 1px solid rgba(15, 36, 41, 0.14);
   border-radius: 10px;
@@ -464,6 +489,21 @@ form {
   background: #fff;
 }
 
+.cowork-msg.msg-user {
+  border-color: rgba(32, 71, 168, 0.24);
+  background: rgba(229, 236, 255, 0.9);
+}
+
+.cowork-msg.msg-agent {
+  border-color: rgba(29, 108, 67, 0.24);
+  background: rgba(230, 247, 236, 0.9);
+}
+
+.cowork-msg.msg-system {
+  border-color: rgba(133, 94, 23, 0.22);
+  background: rgba(255, 244, 218, 0.9);
+}
+
 .cowork-msg strong {
   display: block;
   font-size: 0.72rem;
@@ -471,6 +511,14 @@ form {
   margin-bottom: 4px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.cowork-msg .msg-meta {
+  display: block;
+  margin-top: 4px;
+  color: rgba(15, 36, 41, 0.64);
+  font-size: 0.69rem;
+  font-family: var(--mono);
 }
 
 .cowork-live-frame {
@@ -499,6 +547,11 @@ form {
 
 #watch-output {
   max-height: 190px;
+}
+
+#terminal-output {
+  min-height: 220px;
+  max-height: 320px;
 }
 
 pre {

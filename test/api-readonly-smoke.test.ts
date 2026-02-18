@@ -7,6 +7,7 @@ const thisDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(thisDir, "..");
 const port = 8900 + Math.floor(Math.random() * 200);
 const baseUrl = `http://127.0.0.1:${port}`;
+const dbPath = path.join(repoRoot, ".state", `stickman-test-${port}.db`);
 
 let server: ReturnType<typeof spawn> | null = null;
 let serverLogs = "";
@@ -73,6 +74,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       PORT: String(port),
+      STICKMAN_DB_PATH: dbPath,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -153,6 +155,8 @@ describe("api read-only smoke", () => {
     const livekitControlToken = await apiPost("/api/livekit/token/control", {});
     const livekitTokenInvalidSource = await apiPost("/api/livekit/token", { sourceId: "invalid-source" });
     const codeStatus = await apiGet("/api/code/status");
+    const codeSessions = await apiGet("/api/code/sessions");
+    const terminalPtySessions = await apiGet("/api/terminal/sessions");
     const wsUpgrade = await apiGet("/api/live/ws");
 
     expect(tasks.status).toBe(200);
@@ -164,6 +168,8 @@ describe("api read-only smoke", () => {
     expect([200, 400]).toContain(livekitControlToken.status);
     expect(livekitTokenInvalidSource.status).toBe(400);
     expect(codeStatus.status).toBe(200);
+    expect(codeSessions.status).toBe(200);
+    expect([423, 501]).toContain(terminalPtySessions.status);
     expect(wsUpgrade.status).toBe(426);
 
     expect((tasks.body as Record<string, unknown>).ok).toBe(true);
@@ -175,6 +181,8 @@ describe("api read-only smoke", () => {
     expect(typeof (livekitControlToken.body as Record<string, unknown>).ok).toBe("boolean");
     expect((livekitTokenInvalidSource.body as Record<string, unknown>).ok).toBe(false);
     expect((codeStatus.body as Record<string, unknown>).ok).toBe(true);
+    expect(Array.isArray((codeSessions.body as Record<string, unknown>).sessions)).toBe(true);
+    expect((terminalPtySessions.body as Record<string, unknown>).ok).toBe(false);
     expect((wsUpgrade.body as Record<string, unknown>).ok).toBe(false);
   });
 });

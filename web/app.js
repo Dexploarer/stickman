@@ -30,6 +30,8 @@ const state = {
   integrationActionHistory: [],
   integrationSubscribers: [],
   integrationBridgeStatus: null,
+  terminalSessions: [],
+  terminalActiveSessionId: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -60,6 +62,13 @@ const splitPathInput = (raw) => {
 };
 
 const timestamp = () => new Date().toISOString();
+const formatClock = (iso) => {
+  const date = new Date(iso || Date.now());
+  if (Number.isNaN(date.getTime())) {
+    return "--:--:--";
+  }
+  return date.toLocaleTimeString();
+};
 
 const logActivity = (title, payload) => {
   const logNode = $("activity-log");
@@ -142,10 +151,12 @@ const renderCoworkChat = () => {
   }
   state.coworkMessages.forEach((message) => {
     const item = document.createElement("div");
-    item.className = "cowork-msg";
     const role = String(message.role || "agent");
+    item.className = `cowork-msg msg-${role}`;
     const title = role === "user" ? "You" : role === "agent" ? "Agent" : "System";
-    item.innerHTML = `<strong>${title}</strong>${String(message.text || "").replace(/</g, "&lt;")}`;
+    item.innerHTML = `<strong>${title}</strong>${String(message.text || "").replace(/</g, "&lt;")}<span class="msg-meta">${formatClock(
+      message.at,
+    )}</span>`;
     node.appendChild(item);
   });
   node.scrollTop = node.scrollHeight;
@@ -271,6 +282,7 @@ const toInt = (raw, fallback) => {
 const refreshProviderStatus = async () => {
   const result = await apiGet("/api/providers/status");
   state.providerStatus = result?.status || null;
+  renderCoworkShellBanner();
   setText("provider-status-output", result);
   return result;
 };
@@ -279,6 +291,7 @@ const refreshIntegrations = async () => {
   const result = await apiGet("/api/integrations/status");
   state.integrations = result?.integrations || null;
   renderIntegrationBadges();
+  renderCoworkShellBanner();
   setText("integrations-output", result);
   return result;
 };
@@ -464,6 +477,87 @@ const refreshCodeStatus = async () => {
   return result;
 };
 
+const refreshTerminalSessions = async () => {
+  const result = await apiGet("/api/code/sessions");
+  state.terminalSessions = Array.isArray(result?.sessions) ? result.sessions : [];
+  const select = $("terminal-session-select");
+  if (select) {
+    const current = state.terminalActiveSessionId || select.value;
+    select.innerHTML = "";
+    const fallback = document.createElement("option");
+    fallback.value = "";
+    fallback.textContent = "latest session";
+    select.appendChild(fallback);
+    state.terminalSessions.slice(0, 60).forEach((session) => {
+      const option = document.createElement("option");
+      option.value = session.id;
+      option.textContent = `${session.id} • ${session.status} • ${session.command}`;
+      select.appendChild(option);
+    });
+    if (current && state.terminalSessions.some((session) => session.id === current)) {
+      select.value = current;
+      state.terminalActiveSessionId = current;
+    } else if (state.terminalSessions[0]) {
+      select.value = state.terminalSessions[0].id;
+      state.terminalActiveSessionId = state.terminalSessions[0].id;
+    } else {
+      select.value = "";
+      state.terminalActiveSessionId = "";
+    }
+  }
+  return result;
+};
+
+const loadTerminalSession = async (sessionIdRaw) => {
+  const sessionId = String(sessionIdRaw || "").trim() || state.terminalSessions[0]?.id || "";
+  if (!sessionId) {
+    setText("terminal-output", "No terminal session found yet.");
+    return null;
+  }
+  const result = await apiGet(`/api/code/sessions/${encodeURIComponent(sessionId)}`);
+  state.terminalActiveSessionId = sessionId;
+  const session = result?.session || null;
+  const lines = [];
+  if (session) {
+    lines.push(`$ ${session.command}`);
+    lines.push("");
+    if (session.stdout) {
+      lines.push(String(session.stdout));
+    }
+    if (session.stderr) {
+      if (session.stdout) {
+        lines.push("");
+      }
+      lines.push("[stderr]");
+      lines.push(String(session.stderr));
+    }
+    lines.push("");
+    lines.push(`[status=${session.status} exit=${session.exitCode} cwd=${session.cwd}]`);
+  }
+  setText("terminal-output", {
+    ok: result?.ok,
+    sessionId,
+    output: lines.join("\n"),
+  });
+  return result;
+};
+
+const runEmbeddedTerminalCommand = async (command, cwd) => {
+  const result = await apiPost("/api/code/exec", {
+    command,
+    cwd: cwd || undefined,
+  });
+  setText("terminal-output", result);
+  await refreshCodeStatus();
+  await refreshCodeApprovals();
+  await refreshTerminalSessions();
+  const sessionId = result?.session?.id || state.terminalSessions[0]?.id || "";
+  if (sessionId) {
+    await loadTerminalSession(sessionId);
+  }
+  return result;
+};
+
 const refreshCodeApprovals = async () => {
   const result = await apiGet("/api/code/approvals");
   state.codeApprovals = Array.isArray(result?.approvals) ? result.approvals : [];
@@ -559,6 +653,28 @@ const renderCoworkMetrics = () => {
     item.appendChild(value);
     node.appendChild(item);
   });
+};
+
+const renderCoworkShellBanner = () => {
+  const node = $("cowork-shell-banner");
+  if (!node) {
+    return;
+  }
+  const summary = state.coworkState?.summary || {};
+  const running = Number(summary.tasks?.running || 0);
+  const queued = Number(summary.tasks?.queued || 0);
+  const approvals = Number(summary.approvals?.total || 0);
+  const watch = Number(summary.watch?.active || 0);
+  const route = state.providerStatus?.activeRoute || state.providerStatus?.mode || "unknown";
+  const codex = state.integrations?.codex?.available ? "ready" : "missing";
+  const claude = state.integrations?.claude?.sessionDetected ? "detected" : "missing";
+  const livekit = state.integrations?.livekit?.configured ? "configured" : "off";
+  node.textContent = [
+    "milady cowork gateway",
+    `route=${route} tasks=${running}/${queued} approvals=${approvals} watch=${watch}`,
+    `codex=${codex} claude_session=${claude} livekit=${livekit}`,
+    "slash: /status /help /new /compact /watch /terminal <command>",
+  ].join("\n");
 };
 
 const renderCoworkTaskBoard = () => {
@@ -795,6 +911,7 @@ const refreshCoworkState = async () => {
   state.coworkState = result || null;
   renderWatchSessionOptions();
   renderCoworkMetrics();
+  renderCoworkShellBanner();
   renderWatchObserverMeta();
   setText("cowork-state-output", result);
   return result;
@@ -968,6 +1085,96 @@ const runCoworkQuickAction = async (action) => {
   await refreshCoworkState();
   await refreshTaskLogTail();
   return result;
+};
+
+const runCoworkSlashCommand = async (rawInput) => {
+  const input = String(rawInput || "").trim();
+  if (!input.startsWith("/")) {
+    return false;
+  }
+  const [commandRaw, ...restParts] = input.split(" ");
+  const command = commandRaw.toLowerCase();
+  const args = restParts.join(" ").trim();
+
+  if (command === "/help") {
+    addCoworkMessage(
+      "agent",
+      "Commands: /status, /new, /reset, /compact, /watch, /terminal <command>, /help",
+    );
+    return true;
+  }
+
+  if (command === "/status") {
+    await Promise.all([refreshProviderStatus(), refreshCoworkState(), refreshIntegrations()]);
+    const summary = state.coworkState?.summary || {};
+    addCoworkMessage(
+      "agent",
+      `route=${state.providerStatus?.activeRoute || "unknown"} running=${summary.tasks?.running || 0} queued=${
+        summary.tasks?.queued || 0
+      } approvals=${summary.approvals?.total || 0} watch=${summary.watch?.active || 0}`,
+    );
+    return true;
+  }
+
+  if (command === "/new" || command === "/reset") {
+    state.coworkMessages = [];
+    saveCoworkMessages();
+    renderCoworkChat();
+    addCoworkMessage("system", "Chat session reset.");
+    return true;
+  }
+
+  if (command === "/compact") {
+    const keep = 24;
+    if (state.coworkMessages.length > keep) {
+      state.coworkMessages = state.coworkMessages.slice(-keep);
+      saveCoworkMessages();
+      renderCoworkChat();
+    }
+    addCoworkMessage("system", `Compacted chat history to last ${Math.min(keep, state.coworkMessages.length)} messages.`);
+    return true;
+  }
+
+  if (command === "/watch") {
+    const sourceId = ($("watch-source-select")?.value || "").trim() || "embedded-browser";
+    const fps = toInt($("watch-fps")?.value, 2);
+    const candidateTask = (state.tasks || []).find((task) => ["running", "queued", "waiting_approval"].includes(task.status))
+      || (state.tasks || [])[0];
+    if (!candidateTask?.id) {
+      addCoworkMessage("system", "No task available to watch.");
+      return true;
+    }
+    await startWatchSessionFlow({
+      sourceId,
+      taskId: candidateTask.id,
+      fps,
+      outputId: "watch-output",
+    });
+    addCoworkMessage("agent", `Watching task ${candidateTask.id} on ${sourceId}.`);
+    return true;
+  }
+
+  if (command === "/terminal") {
+    if (!args) {
+      addCoworkMessage("system", "Usage: /terminal <command>");
+      return true;
+    }
+    if ($("terminal-command")) {
+      $("terminal-command").value = args;
+    }
+    const cwd = ($("terminal-cwd")?.value || "").trim();
+    const result = await runEmbeddedTerminalCommand(args, cwd);
+    addCoworkMessage("agent", `Terminal executed: ${args} (${result?.ok ? "ok" : "failed"})`);
+    return true;
+  }
+
+  if (command === "/think" || command === "/usage" || command === "/model" || command === "/verbose" || command === "/restart") {
+    addCoworkMessage("system", `${command} is not wired in dashboard mode yet. Use provider and autonomy controls in this panel.`);
+    return true;
+  }
+
+  addCoworkMessage("system", `Unknown command: ${command}. Try /help.`);
+  return true;
 };
 
 const runMissionTemplate = async (missionId) => {
@@ -1916,6 +2123,14 @@ const bindDashboardEvents = () => {
     }
     try {
       addCoworkMessage("user", task);
+      if (await runCoworkSlashCommand(task)) {
+        setText("cowork-output", {
+          ok: true,
+          mode: "slash_command",
+          command: task.split(/\s+/)[0],
+        });
+        return;
+      }
       setText("cowork-output", "Dispatching task...");
       const result = await apiPost("/api/cowork/dispatch", {
         task,
@@ -1945,6 +2160,28 @@ const bindDashboardEvents = () => {
       addCoworkMessage("system", message);
       setText("cowork-output", message);
     }
+  });
+
+  document.querySelectorAll("[data-cowork-command]").forEach((node) => {
+    node.addEventListener("click", async () => {
+      const command = String(node.getAttribute("data-cowork-command") || "").trimEnd();
+      if (!command) {
+        return;
+      }
+      if (command === "/terminal") {
+        if ($("cowork-task-input")) {
+          $("cowork-task-input").value = "/terminal ";
+          $("cowork-task-input").focus();
+        }
+        return;
+      }
+      addCoworkMessage("user", command);
+      try {
+        await runCoworkSlashCommand(command);
+      } catch (error) {
+        addCoworkMessage("system", error instanceof Error ? error.message : String(error));
+      }
+    });
   });
 
   $("cowork-clear-chat")?.addEventListener("click", () => {
@@ -2178,6 +2415,10 @@ const bindDashboardEvents = () => {
       setText("code-exec-output", result);
       await refreshCodeStatus();
       await refreshCodeApprovals();
+      await refreshTerminalSessions();
+      if (result?.session?.id) {
+        await loadTerminalSession(result.session.id);
+      }
       logActivity("Code command executed", {
         command,
         ok: result?.ok,
@@ -2219,6 +2460,10 @@ const bindDashboardEvents = () => {
       }
       await refreshCodeStatus();
       await refreshCodeApprovals();
+      await refreshTerminalSessions();
+      if (result?.result?.session?.id) {
+        await loadTerminalSession(result.result.session.id);
+      }
       logActivity("Code approval executed", { id, ok: result?.ok });
     } catch (error) {
       setText("code-approvals-output", error instanceof Error ? error.message : String(error));
@@ -2239,6 +2484,59 @@ const bindDashboardEvents = () => {
       logActivity("Code approval rejected", { id, ok: result?.ok });
     } catch (error) {
       setText("code-approvals-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("terminal-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const command = ($("terminal-command")?.value || "").trim();
+    const cwd = ($("terminal-cwd")?.value || "").trim();
+    if (!command) {
+      setText("terminal-output", "Command is required.");
+      return;
+    }
+    try {
+      await runEmbeddedTerminalCommand(command, cwd);
+      addCoworkMessage("agent", `Terminal command queued: ${command}`);
+    } catch (error) {
+      setText("terminal-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("terminal-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshTerminalSessions();
+      if (state.terminalActiveSessionId) {
+        await loadTerminalSession(state.terminalActiveSessionId);
+      }
+    } catch (error) {
+      setText("terminal-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("terminal-load")?.addEventListener("click", async () => {
+    const selected = ($("terminal-session-select")?.value || "").trim() || state.terminalActiveSessionId;
+    try {
+      await loadTerminalSession(selected);
+    } catch (error) {
+      setText("terminal-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("terminal-clear")?.addEventListener("click", () => {
+    setText("terminal-output", "");
+  });
+
+  $("terminal-session-select")?.addEventListener("change", async () => {
+    const selected = ($("terminal-session-select")?.value || "").trim();
+    state.terminalActiveSessionId = selected;
+    if (!selected) {
+      return;
+    }
+    try {
+      await loadTerminalSession(selected);
+    } catch (error) {
+      setText("terminal-output", error instanceof Error ? error.message : String(error));
     }
   });
 
@@ -3438,6 +3736,7 @@ const boot = async () => {
   await refreshApprovals();
   await refreshCodeStatus();
   await refreshCodeApprovals();
+  await refreshTerminalSessions();
   await refreshSkills();
   await refreshTasks();
   await refreshCoworkState();
@@ -3465,6 +3764,7 @@ const boot = async () => {
         refreshIntegrations(),
         refreshIntegrationBridgeStatus(),
         refreshIntegrationActionHistory(),
+        refreshTerminalSessions(),
       ]);
     } catch {
       // keep dashboard responsive even if one refresh cycle fails

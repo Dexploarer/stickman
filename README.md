@@ -22,6 +22,8 @@ Local-first social automation stack with onboarding, OpenRouter model orchestrat
 - Mac control bridge for Antigravity, Terminal, and Chrome with allowlist policy (`/api/mac/apps`, `/api/mac/policy`)
 - Watch-along screenshare channel with websocket stream (`/api/live/ws`) and watch sessions (`/api/watch/*`)
 - CLI bridges honor local overrides: `POD_CODEX_CLI_PATH`, `CODEX_CLI_COMMAND`, `CLAUDE_CLI_COMMAND`
+- Local SQLite state engine (`better-sqlite3`, WAL mode) for onboarding, integration bridge, action history, and code session transcripts
+- Legacy JSON state (`.state/onboarding.json`, `.state/integration-bridge.json`) is migration bootstrap only once DB is initialized
 - Onboarding for:
   - OpenRouter key test
   - provider mode selection + Claude session checks
@@ -81,12 +83,15 @@ Setup now also guarantees per-worktree local state scaffolding:
 - `./.state/onboarding.json`
 - `./.state/openrouter-models-cache.json`
 - `./.state/integration-bridge.json`
+- `./.state/stickman.db` (SQLite, WAL mode)
 - `./.pordie/config.json`
 - `./.pordie/env.sh`
 
 ## Environment Notes
 
 - `PORDIE_SCOPE=global|project` (optional) forces export scope regardless of onboarding value
+- `STICKMAN_DB_PATH` (optional) overrides local SQLite path (default: `./.state/stickman.db`)
+- `TERMINAL_PTY_ENABLED=true` enables experimental PTY endpoint surface (default is guarded command terminal only)
 - `X_NOTIFY` defaults to enabled when unset
 - Local secret import is explicit one-shot permission only (`allowLocalSecretsRead=true`)
 - X operations may still require interactive challenge/2FA/human verification depending on account state
@@ -159,6 +164,7 @@ Environment knobs for smoke:
 - `SMOKE_PORT` (default `8790`)
 - `SMOKE_BASE_URL` (optional; if set to an existing server, no new server is started)
 - `SMOKE_TIMEOUT_SECONDS` (default `30`)
+- `SMOKE_DB_PATH` (optional; overrides smoke-run SQLite path)
 
 Optional LiveKit env (for remote cowork transport):
 
@@ -248,8 +254,16 @@ This creates and launches:
 - `DELETE /api/integrations/subscriptions/:id`
 - `GET /api/integrations/bridge/status`
 - `GET /api/code/status`
+- `GET /api/code/sessions`
+- `GET /api/code/sessions/:id`
 - `POST /api/code/plan`
 - `POST /api/code/exec`
+- `POST /api/terminal/sessions` (feature-flagged PTY mode)
+- `GET /api/terminal/sessions` (feature-flagged PTY mode)
+- `POST /api/terminal/sessions/:id/input` (feature-flagged PTY mode)
+- `POST /api/terminal/sessions/:id/resize` (feature-flagged PTY mode)
+- `POST /api/terminal/sessions/:id/close` (feature-flagged PTY mode)
+- `GET /api/terminal/ws` (feature-flagged PTY mode)
 - `GET /api/code/approvals`
 - `POST /api/code/approvals/:id/approve`
 - `POST /api/code/approvals/:id/reject`

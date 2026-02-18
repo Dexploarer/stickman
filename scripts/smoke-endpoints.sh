@@ -9,6 +9,7 @@ SMOKE_BASE_URL="${SMOKE_BASE_URL:-http://localhost:${SMOKE_PORT}}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-30}"
 SMOKE_LAST_RESP="${SMOKE_LAST_RESP:-/tmp/mss_smoke_last_resp.json}"
 SMOKE_LOG_FILE="${SMOKE_LOG_FILE:-/tmp/mss-smoke-dev.log}"
+SMOKE_DB_PATH="${SMOKE_DB_PATH:-${ROOT_DIR}/.state/stickman-smoke-${SMOKE_PORT}.db}"
 
 PASS=0
 FAIL=0
@@ -64,7 +65,7 @@ wait_for_health() {
 if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$SMOKE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "Port ${SMOKE_PORT} already in use; assuming external server mode."
 else
-  PORT="$SMOKE_PORT" bun run dev >"$SMOKE_LOG_FILE" 2>&1 &
+  PORT="$SMOKE_PORT" STICKMAN_DB_PATH="$SMOKE_DB_PATH" bun run dev >"$SMOKE_LOG_FILE" 2>&1 &
   SERVER_PID="$!"
 fi
 
@@ -147,6 +148,16 @@ fi
 
 req live_ws_upgrade GET /api/live/ws 426
 req code_status GET /api/code/status 200
+req code_sessions_list_initial GET /api/code/sessions 200
+req terminal_pty_sessions_disabled GET /api/terminal/sessions 423
+req code_exec_readonly POST /api/code/exec 200 '{"command":"pwd"}'
+CODE_SESSION_ID=$(SMOKE_LAST_RESP="$SMOKE_LAST_RESP" node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync(process.env.SMOKE_LAST_RESP || "/tmp/mss_smoke_last_resp.json","utf8")); process.stdout.write(x.session?.id || "")')
+if [ -n "$CODE_SESSION_ID" ]; then
+  req code_session_detail GET "/api/code/sessions/${CODE_SESSION_ID}" 200
+else
+  echo "FAIL code_session_parse [missing session id]"
+  FAIL=$((FAIL + 1))
+fi
 
 req integrations_subscriber_create POST /api/integrations/subscriptions 201 '{"url":"https://example.com/hooks/stickman","events":["integration_*"]}'
 SUB_ID=$(SMOKE_LAST_RESP="$SMOKE_LAST_RESP" node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync(process.env.SMOKE_LAST_RESP || "/tmp/mss_smoke_last_resp.json","utf8")); process.stdout.write(x.subscriber?.id || "")')

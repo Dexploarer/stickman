@@ -2,6 +2,9 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
+import { getCodeSessionRecord, listCodeSessionRecords, upsertCodeSessionRecord } from "../db/repositories/code-sessions-repo.js";
+import type { TerminalSessionRecord } from "../types.js";
+
 export type WorkspaceSessionStatus = "running" | "succeeded" | "failed";
 
 export interface WorkspaceSession {
@@ -127,17 +130,66 @@ const appendChunk = (base: string, chunk: string): string => {
   return next.slice(next.length - MAX_OUTPUT_CHARS);
 };
 
+const toTerminalSessionRecord = (session: WorkspaceSession): TerminalSessionRecord => ({
+  id: session.id,
+  mode: "command",
+  command: session.command,
+  cwd: session.cwd,
+  status: session.status,
+  startedAt: session.startedAt,
+  finishedAt: session.finishedAt || undefined,
+  durationMs: session.durationMs ?? undefined,
+  exitCode: session.exitCode ?? undefined,
+  stdout: session.stdout,
+  stderr: session.stderr,
+  readOnly: session.readOnly,
+  updatedAt: new Date().toISOString(),
+});
+
+const fromTerminalSessionRecord = (record: TerminalSessionRecord): WorkspaceSession => ({
+  id: record.id,
+  command: record.command,
+  cwd: record.cwd,
+  status: record.status === "running" || record.status === "succeeded" || record.status === "failed" ? record.status : "failed",
+  startedAt: record.startedAt,
+  finishedAt: record.finishedAt || null,
+  durationMs: typeof record.durationMs === "number" ? record.durationMs : null,
+  exitCode: typeof record.exitCode === "number" ? record.exitCode : null,
+  stdout: record.stdout,
+  stderr: record.stderr,
+  readOnly: record.readOnly,
+});
+
+const persistSession = (session: WorkspaceSession) => {
+  upsertCodeSessionRecord(toTerminalSessionRecord(session));
+};
+
 const retainSession = (session: WorkspaceSession) => {
   sessions.set(session.id, session);
-  sessionOrder.push(session.id);
+  if (!sessionOrder.includes(session.id)) {
+    sessionOrder.push(session.id);
+  }
   if (sessionOrder.length <= MAX_SESSION_HISTORY) {
+    persistSession(session);
     return;
   }
   const overflow = sessionOrder.splice(0, sessionOrder.length - MAX_SESSION_HISTORY);
   for (const id of overflow) {
     sessions.delete(id);
   }
+  persistSession(session);
 };
+
+const hydrateWorkspaceSessions = () => {
+  const persisted = listCodeSessionRecords(MAX_SESSION_HISTORY).reverse();
+  for (const record of persisted) {
+    const session = fromTerminalSessionRecord(record);
+    sessions.set(session.id, session);
+    sessionOrder.push(session.id);
+  }
+};
+
+hydrateWorkspaceSessions();
 
 export const listWorkspaceSessions = (limit = 40): WorkspaceSession[] => {
   const safeLimit = Math.max(1, Math.min(limit, 120));
@@ -149,7 +201,17 @@ export const listWorkspaceSessions = (limit = 40): WorkspaceSession[] => {
 };
 
 export const getWorkspaceSession = (sessionId: string): WorkspaceSession | null => {
-  return sessions.get(sessionId) || null;
+  const cached = sessions.get(sessionId);
+  if (cached) {
+    return cached;
+  }
+  const persisted = getCodeSessionRecord(sessionId);
+  if (!persisted) {
+    return null;
+  }
+  const session = fromTerminalSessionRecord(persisted);
+  retainSession(session);
+  return session;
 };
 
 export const resolveWorkspaceCwd = (projectRoot: string, requestedCwd?: string): string => {
@@ -237,6 +299,7 @@ export const runWorkspaceCommand = async (input: {
   child.stdout.on("data", (chunk: Buffer | string) => {
     const text = sanitizeChunk(chunk.toString());
     session.stdout = appendChunk(session.stdout, text);
+    persistSession(session);
     input.onEvent?.({
       type: "stdout",
       sessionId: id,
@@ -249,6 +312,7 @@ export const runWorkspaceCommand = async (input: {
   child.stderr.on("data", (chunk: Buffer | string) => {
     const text = sanitizeChunk(chunk.toString());
     session.stderr = appendChunk(session.stderr, text);
+    persistSession(session);
     input.onEvent?.({
       type: "stderr",
       sessionId: id,
@@ -280,6 +344,7 @@ export const runWorkspaceCommand = async (input: {
   session.finishedAt = new Date().toISOString();
   session.durationMs = Date.now() - startedAtEpoch;
   session.status = exitCode === 0 ? "succeeded" : "failed";
+  persistSession(session);
   input.onEvent?.({
     type: "exit",
     sessionId: id,

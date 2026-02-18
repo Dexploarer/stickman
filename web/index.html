@@ -562,11 +562,20 @@
               </section>
               <section class="cowork-lane">
                 <h3>Agent Chat + Task Dispatch</h3>
+                <div id="cowork-shell-banner" class="cowork-shell-banner"></div>
+                <div class="cowork-command-bar">
+                  <button class="ghost cowork-command-btn" type="button" data-cowork-command="/status">/status</button>
+                  <button class="ghost cowork-command-btn" type="button" data-cowork-command="/help">/help</button>
+                  <button class="ghost cowork-command-btn" type="button" data-cowork-command="/new">/new</button>
+                  <button class="ghost cowork-command-btn" type="button" data-cowork-command="/compact">/compact</button>
+                  <button class="ghost cowork-command-btn" type="button" data-cowork-command="/watch">/watch</button>
+                  <button class="ghost cowork-command-btn" type="button" data-cowork-command="/terminal ">/terminal</button>
+                </div>
                 <div id="cowork-metrics" class="cowork-metrics"></div>
                 <div id="cowork-chat-log" class="cowork-chat-log"></div>
                 <form id="cowork-form">
                   <label>Task for Agent</label>
-                  <textarea id="cowork-task-input" rows="4" placeholder="Investigate trend shifts and propose a 3-step action plan." required></textarea>
+                  <textarea id="cowork-task-input" rows="4" placeholder="Ask directly, or use slash commands (/status, /terminal <cmd>, /watch)." required></textarea>
                   <div class="toggle-row">
                     <label><input id="cowork-auto-plan" type="checkbox" checked /> also generate automation plan</label>
                     <label><input id="cowork-start-task" type="checkbox" checked /> queue as background task</label>
@@ -664,6 +673,28 @@
                   </div>
                   <pre id="code-status-output"></pre>
                   <pre id="code-approvals-output"></pre>
+                </div>
+
+                <div class="sub-panel terminal-panel">
+                  <h3>Embedded Terminal</h3>
+                  <p class="summary">Run guarded workspace commands and inspect live session output without leaving the app.</p>
+                  <label>Session</label>
+                  <select id="terminal-session-select">
+                    <option value="">latest session</option>
+                  </select>
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="terminal-refresh">Refresh Sessions</button>
+                    <button class="ghost" type="button" id="terminal-load">Load Session Output</button>
+                    <button class="ghost" type="button" id="terminal-clear">Clear Output</button>
+                  </div>
+                  <form id="terminal-form">
+                    <label>Command</label>
+                    <input id="terminal-command" type="text" placeholder="rg -n &quot;integration_action&quot; src/server.ts" required />
+                    <label>Working directory (optional)</label>
+                    <input id="terminal-cwd" type="text" placeholder="src" />
+                    <button type="submit">Run in Terminal</button>
+                  </form>
+                  <pre id="terminal-output"></pre>
                 </div>
               </section>
               <section class="cowork-lane">

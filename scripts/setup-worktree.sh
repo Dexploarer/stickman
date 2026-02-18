@@ -42,6 +42,8 @@ fi
 
 mkdir -p .state .pordie
 
+DB_PATH="${STICKMAN_DB_PATH:-$WORKDIR/.state/stickman.db}"
+
 if [ ! -f .state/onboarding.json ]; then
   echo "{}" > .state/onboarding.json
 fi
@@ -61,6 +63,32 @@ if [ ! -f .state/integration-bridge.json ]; then
   }
 }
 EOF
+fi
+
+mkdir -p "$(dirname "$DB_PATH")"
+if [ ! -f "$DB_PATH" ]; then
+  touch "$DB_PATH"
+fi
+
+if [ ! -w "$(dirname "$DB_PATH")" ]; then
+  warn "SQLite directory is not writable: $(dirname "$DB_PATH")"
+else
+  if ! DB_PATH="$DB_PATH" bun -e '\
+const dbPath = process.env.DB_PATH; \
+const BetterSqlite3 = require(\"better-sqlite3\"); \
+const db = new BetterSqlite3(dbPath); \
+db.pragma(\"journal_mode = WAL\"); \
+db.exec(\"CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL)\"); \
+const now = new Date().toISOString(); \
+db.prepare(\"INSERT INTO meta(key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at\").run(\"bootstrap_check\", \"ok\", now); \
+const mode = String(db.pragma(\"journal_mode\", { simple: true }) || \"\").toUpperCase(); \
+if (mode !== \"WAL\") { \
+  console.error(`Expected WAL mode, got ${mode || \"unknown\"}`); \
+  process.exit(1); \
+} \
+db.close();' >/dev/null 2>&1; then
+    warn "SQLite bootstrap check failed for DB path: $DB_PATH"
+  fi
 fi
 
 if [ ! -f .pordie/config.json ]; then
@@ -127,6 +155,7 @@ printf "  %-24s %s\n" "Claude CLI command" "$CLAUDE_CLI_COMMAND"
 printf "  %-24s %s\n" "Codex CLI" "$(command -v codex 2>/dev/null || echo missing)"
 printf "  %-24s %s\n" "Antigravity app" "$ANTIGRAVITY_STATUS"
 printf "  %-24s %s\n" "Google Chrome app" "$CHROME_STATUS"
+printf "  %-24s %s\n" "SQLite DB path" "$DB_PATH"
 
 info
 info "Environment bootstrap complete."

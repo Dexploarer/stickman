@@ -16,6 +16,8 @@ describe("config/defaultOnboardingState", () => {
     expect(defaults.livekit.enabled).toBe(false);
     expect(defaults.livekit.streamMode).toBe("events_only");
     expect(defaults.livekit.roomPrefix.length).toBeGreaterThan(0);
+    expect(defaults.storage?.engine).toBe("sqlite");
+    expect(typeof defaults.storage?.path).toBe("string");
   });
 
   it("enables all catalog skills by default", () => {

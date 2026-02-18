@@ -38,6 +38,8 @@ export type IntegrationStepId =
   | "mint_livekit_viewer_token"
   | "refresh_integrations_status";
 export type IntegrationStepStatus = "planned" | "skipped" | "executed" | "failed" | "approval_required";
+export type TerminalSessionMode = "command" | "pty";
+export type MigrationVersion = string;
 
 export type XArgValue =
   | string
@@ -48,6 +50,13 @@ export type XArgValue =
   | Array<string | number | boolean>;
 
 export type XArgMap = Record<string, XArgValue>;
+
+export interface LocalDatabaseConfig {
+  engine: "sqlite";
+  path: string;
+  journalMode: "WAL";
+  synchronous: "NORMAL";
+}
 
 export interface XRunRequest {
   endpoint: string;
@@ -181,6 +190,12 @@ export interface OnboardingLivekit {
   streamMode: "events_only" | "events_and_frames";
 }
 
+export interface OnboardingStorage {
+  engine: "sqlite";
+  path?: string;
+  migratedAt?: string;
+}
+
 export interface OnboardingState {
   completed: boolean;
   updatedAt: string | null;
@@ -195,6 +210,7 @@ export interface OnboardingState {
   watch: OnboardingWatch;
   livekit: OnboardingLivekit;
   pordie: OnboardingPordie;
+  storage?: OnboardingStorage;
 }
 
 export interface ProviderStatus {
@@ -354,6 +370,22 @@ export interface IntegrationBridgeStatus {
     publisherReady: boolean;
     lastPublishError?: string;
   };
+}
+
+export interface TerminalSessionRecord {
+  id: string;
+  mode: TerminalSessionMode;
+  command: string;
+  cwd: string;
+  status: string;
+  startedAt: string;
+  finishedAt?: string;
+  durationMs?: number;
+  exitCode?: number;
+  stdout: string;
+  stderr: string;
+  readOnly: boolean;
+  updatedAt: string;
 }
 
 export interface OpenRouterModelRecord {

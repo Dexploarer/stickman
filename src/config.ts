@@ -12,6 +12,12 @@ export const onboardingStatePath = path.resolve(stateDir, "onboarding.json");
 export const modelCachePath = path.resolve(stateDir, "openrouter-models-cache.json");
 export const workflowStorePath = path.resolve(stateDir, "workflows.json");
 export const integrationBridgeStatePath = path.resolve(stateDir, "integration-bridge.json");
+const dbPathRaw = (process.env.STICKMAN_DB_PATH || "").trim();
+export const dbPath = dbPathRaw
+  ? path.isAbsolute(dbPathRaw)
+    ? dbPathRaw
+    : path.resolve(projectRoot, dbPathRaw)
+  : path.resolve(stateDir, "stickman.db");
 export const homePordieDir = path.resolve(os.homedir(), ".pordie");
 export const projectPordieDir = path.resolve(projectRoot, ".pordie");
 
@@ -58,6 +64,12 @@ const normalizeLivekitStreamMode = (value: string | undefined): "events_only" | 
 
 export const appConfig = {
   port: Number(process.env.PORT || 8787),
+  db: {
+    path: dbPath,
+  },
+  terminal: {
+    ptyEnabled: toBool(process.env.TERMINAL_PTY_ENABLED, false),
+  },
   claude: {
     sessionPath: toOptional(process.env.CLAUDE_SESSION_PATH),
     cliCommand: process.env.CLAUDE_CLI_COMMAND || "claude -p",
@@ -208,6 +220,10 @@ export const defaultOnboardingState = (): OnboardingState => ({
     scope: resolvePordieScope("global"),
     autoExportOnComplete: appConfig.pordie.autoExportOnComplete,
     syncProjectEnv: appConfig.pordie.syncProjectEnv,
+  },
+  storage: {
+    engine: "sqlite",
+    path: appConfig.db.path,
   },
 });
 

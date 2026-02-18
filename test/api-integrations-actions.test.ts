@@ -7,6 +7,7 @@ const thisDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(thisDir, "..");
 const port = 9200 + Math.floor(Math.random() * 200);
 const baseUrl = `http://127.0.0.1:${port}`;
+const dbPath = path.join(repoRoot, ".state", `stickman-test-${port}.db`);
 
 let server: ReturnType<typeof spawn> | null = null;
 let serverLogs = "";
@@ -56,6 +57,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       PORT: String(port),
+      STICKMAN_DB_PATH: dbPath,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

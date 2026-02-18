@@ -1,7 +1,16 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 
+import {
+  deleteIntegrationSubscriberFromDb,
+  getIntegrationBridgeStatsFromDb,
+  getIntegrationSubscriberByIdFromDb,
+  listIntegrationSubscribersFromDb,
+  setIntegrationSubscriberEnabledInDb,
+  updateIntegrationBridgeStatsInDb,
+  updateIntegrationSubscriberDeliveryInDb,
+  upsertIntegrationSubscriberInDb,
+} from "../db/repositories/integration-bridge-repo.js";
+import { ensureDatabaseReady } from "../db/migrate.js";
 import type { IntegrationSubscriber } from "../types.js";
 import type { IntegrationBridgeStorageShape } from "./types.js";
 
@@ -32,44 +41,8 @@ const sanitizeEvents = (events: unknown): string[] => {
   return Array.from(new Set(rows));
 };
 
-const parseStorage = (raw: string): IntegrationBridgeStorageShape => {
-  try {
-    const parsed = JSON.parse(raw) as Partial<IntegrationBridgeStorageShape> | null;
-    const subscribers = Array.isArray(parsed?.subscribers)
-      ? parsed?.subscribers
-          .filter((item): item is IntegrationSubscriber => Boolean(item && typeof item === "object"))
-          .map((item) => ({
-            id: String(item.id || randomUUID()),
-            url: String(item.url || ""),
-            enabled: item.enabled !== false,
-            events: sanitizeEvents(item.events),
-            secret: String(item.secret || ""),
-            createdAt: String(item.createdAt || new Date().toISOString()),
-            updatedAt: String(item.updatedAt || new Date().toISOString()),
-            lastSuccessAt: item.lastSuccessAt ? String(item.lastSuccessAt) : undefined,
-            lastError: item.lastError ? String(item.lastError) : undefined,
-          }))
-          .filter((item) => item.url && item.secret)
-      : [];
-    const stats = {
-      delivered: Number(parsed?.stats?.delivered || 0),
-      failed: Number(parsed?.stats?.failed || 0),
-      retriesScheduled: Number(parsed?.stats?.retriesScheduled || 0),
-      lastDeliveryAt: parsed?.stats?.lastDeliveryAt ? String(parsed.stats.lastDeliveryAt) : undefined,
-      lastEventAt: parsed?.stats?.lastEventAt ? String(parsed.stats.lastEventAt) : undefined,
-    };
-    return {
-      subscribers,
-      stats,
-    };
-  } catch {
-    return defaultStorage();
-  }
-};
-
 export class IntegrationSubscriptionStore {
   private filePath: string;
-  private data: IntegrationBridgeStorageShape = defaultStorage();
   private loaded = false;
 
   constructor(filePath: string) {
@@ -80,23 +53,17 @@ export class IntegrationSubscriptionStore {
     if (this.loaded) {
       return;
     }
-    try {
-      const raw = await readFile(this.filePath, "utf-8");
-      this.data = parseStorage(raw);
-    } catch {
-      this.data = defaultStorage();
-      await this.persist();
-    }
+    ensureDatabaseReady();
     this.loaded = true;
   }
 
   async persist() {
-    await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(this.data, null, 2));
+    // Persistence is handled transactionally by SQLite repository methods.
   }
 
   listSubscribers(): IntegrationSubscriber[] {
-    return this.data.subscribers.map((item) => ({
+    ensureDatabaseReady();
+    return listIntegrationSubscribersFromDb().map((item) => ({
       ...item,
       events: [...item.events],
     }));
@@ -121,8 +88,7 @@ export class IntegrationSubscriptionStore {
       createdAt: now,
       updatedAt: now,
     };
-    this.data.subscribers.push(subscriber);
-    await this.persist();
+    upsertIntegrationSubscriberInDb(subscriber);
     return {
       subscriber: this.stripSecret(subscriber),
       secret,
@@ -130,23 +96,14 @@ export class IntegrationSubscriptionStore {
   }
 
   async deleteSubscriber(id: string): Promise<boolean> {
-    const before = this.data.subscribers.length;
-    this.data.subscribers = this.data.subscribers.filter((item) => item.id !== id);
-    if (this.data.subscribers.length !== before) {
-      await this.persist();
-      return true;
-    }
-    return false;
+    return deleteIntegrationSubscriberFromDb(id);
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<IntegrationSubscriber | null> {
-    const subscriber = this.data.subscribers.find((item) => item.id === id);
+    const subscriber = setIntegrationSubscriberEnabledInDb(id, enabled);
     if (!subscriber) {
       return null;
     }
-    subscriber.enabled = enabled;
-    subscriber.updatedAt = new Date().toISOString();
-    await this.persist();
     return {
       ...subscriber,
       events: [...subscriber.events],
@@ -158,36 +115,33 @@ export class IntegrationSubscriptionStore {
     ok: boolean;
     error?: string;
   }) {
-    const subscriber = this.data.subscribers.find((item) => item.id === input.id);
-    if (!subscriber) {
-      return;
-    }
-    if (input.ok) {
-      subscriber.lastSuccessAt = new Date().toISOString();
-      subscriber.lastError = undefined;
-    } else {
-      subscriber.lastError = String(input.error || "delivery_failed");
-    }
-    subscriber.updatedAt = new Date().toISOString();
-    await this.persist();
+    updateIntegrationSubscriberDeliveryInDb(input);
   }
 
   async updateStats(patch: Partial<IntegrationBridgeStorageShape["stats"]>) {
-    this.data.stats = {
-      ...this.data.stats,
-      ...patch,
-    };
-    await this.persist();
+    updateIntegrationBridgeStatsInDb({
+      delivered: patch.delivered,
+      failed: patch.failed,
+      retriesScheduled: patch.retriesScheduled,
+      lastDeliveryAt: patch.lastDeliveryAt,
+      lastEventAt: patch.lastEventAt,
+    });
   }
 
   getStats(): IntegrationBridgeStorageShape["stats"] {
+    ensureDatabaseReady();
+    const stats = getIntegrationBridgeStatsFromDb();
     return {
-      ...this.data.stats,
+      delivered: stats.delivered,
+      failed: stats.failed,
+      retriesScheduled: stats.retriesScheduled,
+      lastDeliveryAt: stats.lastDeliveryAt,
+      lastEventAt: stats.lastEventAt,
     };
   }
 
   getById(id: string): IntegrationSubscriber | null {
-    const subscriber = this.data.subscribers.find((item) => item.id === id);
+    const subscriber = getIntegrationSubscriberByIdFromDb(id);
     if (!subscriber) {
       return null;
     }
@@ -203,5 +157,21 @@ export class IntegrationSubscriptionStore {
       ...rest,
       events: [...rest.events],
     };
+  }
+
+  getStorageSnapshot(): IntegrationBridgeStorageShape {
+    return {
+      subscribers: this.listSubscribers(),
+      stats: this.getStats(),
+    };
+  }
+
+  getLegacyFilePath() {
+    return this.filePath;
+  }
+
+  resetToDefaults() {
+    const snapshot = defaultStorage();
+    return snapshot;
   }
 }
