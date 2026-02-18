@@ -24,7 +24,19 @@ jobs:
             --state-file .github/contributor-trust.json \
             --output trust-result.json
           cat trust-result.json
-          node -e "const fs=require('node:fs');const d=JSON.parse(fs.readFileSync('trust-result.json','utf8'));const lines=['## Contributor Trust Snapshot',`- Contributor: \\`${d.contributor}\\``,`- Event: \\`${d.event.type}\\` on PR #${d.event.prNumber ?? 'n/a'}`,`- Score: **${d.result.score}**`,`- Tier: **${d.result.tier}**`,`- Warnings: ${d.result.warnings.length ? d.result.warnings.join('; ') : 'none'}`];fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`${lines.join('\\n')}\\n`);"
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const d = JSON.parse(fs.readFileSync("trust-result.json", "utf8"));
+          const lines = [
+            "## Contributor Trust Snapshot",
+            `- Contributor: \`${d.contributor}\``,
+            `- Event: \`${d.event.type}\` on PR #${d.event.prNumber ?? "n/a"}`,
+            `- Score: **${d.result.score}**`,
+            `- Tier: **${d.result.tier}**`,
+            `- Warnings: ${d.result.warnings.length ? d.result.warnings.join("; ") : "none"}`,
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
+NODE
 
       - name: Print current trust summary
         if: github.event_name == 'workflow_dispatch'
