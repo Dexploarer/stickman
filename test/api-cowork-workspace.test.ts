@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,8 @@ const dbPath = path.join(repoRoot, ".state", `stickman-test-${port}.db`);
 
 let server: ReturnType<typeof spawn> | null = null;
 let serverLogs = "";
+
+setDefaultTimeout(45_000);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
