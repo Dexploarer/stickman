@@ -68,8 +68,18 @@ scripts/new-worktree-bootstrap.sh feature/branch-name /path/to/new/worktree
 - `bun: command not found`: install Bun and re-run `bun run setup`.
 - `python3: command not found`: install Python 3 and re-run `bun run setup`.
 - `x-local/setup_env.sh missing`: ensure the repository checkout includes `x-local/`.
-- `claude command not found`: install Claude CLI to use subscription mode (`claude login`).
+- `claude command not found`: install Claude CLI to use subscription mode (`claude login`), or set `CLAUDE_CLI_COMMAND` if your binary path/syntax differs.
+- `codex command not found`: install Codex CLI or configure the coding executor override in your local env.
+- `Antigravity app not found`: install Antigravity if you want `antigravity.open` skills enabled.
+- `Google Chrome.app not found`: install Chrome if you want external browser handoff enabled.
 - `OPENROUTER_API_KEY not set`: text fallback may still work in Claude mode, but image/video/embedding/voice require OpenRouter.
+
+Setup now also guarantees per-worktree local state scaffolding:
+
+- `./.state/onboarding.json`
+- `./.state/openrouter-models-cache.json`
+- `./.pordie/config.json`
+- `./.pordie/env.sh`
 
 ## Environment Notes
 
