@@ -114,8 +114,13 @@ const taskDependsOn = new Map<string, string>();
 const taskDependencyIndex = new Map<string, string[]>();
 const watchSessions = new Map<string, WatchSession>();
 const watchTimers = new Map<string, NodeJS.Timeout>();
-const liveSseClients = new Set<Response>();
-const liveWsClients = new Set<Socket>();
+interface LiveEventClientFilter {
+  watchSessionId?: string;
+  sourceId?: WatchSource["id"];
+  taskId?: string;
+}
+const liveSseClients = new Map<Response, LiveEventClientFilter>();
+const liveWsClients = new Map<Socket, LiveEventClientFilter>();
 const liveEventHistory: Array<{
   id: string;
   type: string;
@@ -135,6 +140,51 @@ const MAX_WATCH_FRAME_PAYLOAD_CHARS = 1_500_000;
 const MAX_WATCH_FRAME_HISTORY = 180;
 const watchFrameHistory: WatchFrameEntry[] = [];
 
+const parseLiveEventFilter = (input: {
+  watchSessionId?: string | null;
+  sourceId?: string | null;
+  taskId?: string | null;
+}): LiveEventClientFilter => {
+  const watchSessionId = String(input.watchSessionId || "").trim();
+  const sourceRaw = String(input.sourceId || "").trim();
+  const taskId = String(input.taskId || "").trim();
+  const sourceId =
+    sourceRaw === "embedded-browser" || sourceRaw === "antigravity" || sourceRaw === "chrome" || sourceRaw === "terminal"
+      ? sourceRaw
+      : undefined;
+  return {
+    watchSessionId: watchSessionId || undefined,
+    sourceId,
+    taskId: taskId || undefined,
+  };
+};
+
+const matchesLiveEventFilter = (
+  event: {
+    type: string;
+    payload: Record<string, unknown>;
+  },
+  filter: LiveEventClientFilter,
+): boolean => {
+  if (!filter.watchSessionId && !filter.sourceId && !filter.taskId) {
+    return true;
+  }
+  const payload = event.payload || {};
+  const eventTaskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+  const eventSourceId = typeof payload.sourceId === "string" ? payload.sourceId : undefined;
+  const eventWatchSessionId = typeof payload.watchSessionId === "string" ? payload.watchSessionId : undefined;
+  if (filter.watchSessionId && filter.watchSessionId !== eventWatchSessionId) {
+    return false;
+  }
+  if (filter.sourceId && filter.sourceId !== eventSourceId) {
+    return false;
+  }
+  if (filter.taskId && filter.taskId !== eventTaskId) {
+    return false;
+  }
+  return true;
+};
+
 const emitLiveEvent = (type: string, payload: Record<string, unknown>) => {
   const event = {
     id: randomUUID(),
@@ -147,7 +197,10 @@ const emitLiveEvent = (type: string, payload: Record<string, unknown>) => {
     liveEventHistory.splice(0, liveEventHistory.length - 400);
   }
   const encoded = `data: ${JSON.stringify(event)}\n\n`;
-  for (const client of liveSseClients) {
+  for (const [client, filter] of liveSseClients.entries()) {
+    if (!matchesLiveEventFilter(event, filter)) {
+      continue;
+    }
     try {
       client.write(encoded);
     } catch {
@@ -156,7 +209,10 @@ const emitLiveEvent = (type: string, payload: Record<string, unknown>) => {
   }
   const wsPayload = JSON.stringify(event);
   const wsFrame = encodeWebSocketFrame(wsPayload);
-  for (const client of liveWsClients) {
+  for (const [client, filter] of liveWsClients.entries()) {
+    if (!matchesLiveEventFilter(event, filter)) {
+      continue;
+    }
     try {
       client.write(wsFrame);
     } catch {
@@ -2511,9 +2567,15 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.get("/api/live/snapshot", (_req, res) => {
+  const filter = parseLiveEventFilter({
+    watchSessionId: typeof _req.query?.sessionId === "string" ? _req.query.sessionId : undefined,
+    sourceId: typeof _req.query?.sourceId === "string" ? _req.query.sourceId : undefined,
+    taskId: typeof _req.query?.taskId === "string" ? _req.query.taskId : undefined,
+  });
   res.json({
     ok: true,
-    events: liveEventHistory.slice(-120),
+    filter,
+    events: liveEventHistory.filter((event) => matchesLiveEventFilter(event, filter)).slice(-120),
   });
 });
 
@@ -2523,12 +2585,17 @@ app.get("/api/live/events", (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders?.();
 
-  liveSseClients.add(res);
-  const bootstrap = liveEventHistory.slice(-40);
+  const filter = parseLiveEventFilter({
+    watchSessionId: typeof req.query?.sessionId === "string" ? req.query.sessionId : undefined,
+    sourceId: typeof req.query?.sourceId === "string" ? req.query.sourceId : undefined,
+    taskId: typeof req.query?.taskId === "string" ? req.query.taskId : undefined,
+  });
+  liveSseClients.set(res, filter);
+  const bootstrap = liveEventHistory.filter((event) => matchesLiveEventFilter(event, filter)).slice(-40);
   for (const event of bootstrap) {
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   }
-  res.write(`event: ready\ndata: ${JSON.stringify({ ok: true, ts: new Date().toISOString() })}\n\n`);
+  res.write(`event: ready\ndata: ${JSON.stringify({ ok: true, ts: new Date().toISOString(), filter })}\n\n`);
 
   const heartbeat = setInterval(() => {
     try {
@@ -4801,7 +4868,14 @@ const startHeartbeatScheduler = () => {
 
 const handleWebSocketUpgrade = (request: { url?: string; headers: Record<string, string | string[] | undefined> }, socket: Socket) => {
   const requestUrl = request.url || "";
-  if (!requestUrl.startsWith("/api/live/ws")) {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(requestUrl, "http://localhost");
+  } catch {
+    socket.destroy();
+    return;
+  }
+  if (!parsedUrl.pathname.startsWith("/api/live/ws")) {
     socket.destroy();
     return;
   }
@@ -4822,8 +4896,13 @@ const handleWebSocketUpgrade = (request: { url?: string; headers: Record<string,
     "\r\n",
   ];
   socket.write(headers.join("\r\n"));
-  liveWsClients.add(socket);
-  const bootstrap = liveEventHistory.slice(-40);
+  const filter = parseLiveEventFilter({
+    watchSessionId: parsedUrl.searchParams.get("sessionId"),
+    sourceId: parsedUrl.searchParams.get("sourceId"),
+    taskId: parsedUrl.searchParams.get("taskId"),
+  });
+  liveWsClients.set(socket, filter);
+  const bootstrap = liveEventHistory.filter((event) => matchesLiveEventFilter(event, filter)).slice(-40);
   for (const event of bootstrap) {
     socket.write(encodeWebSocketFrame(JSON.stringify(event)));
   }

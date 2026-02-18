@@ -129,6 +129,7 @@ describe("api read-only smoke", () => {
     const tasks = await apiGet("/api/agent/tasks");
     const macApps = await apiGet("/api/mac/apps");
     const watchSources = await apiGet("/api/watch/sources");
+    const liveSnapshotFiltered = await apiGet("/api/live/snapshot?sessionId=demo-session&sourceId=embedded-browser");
     const watchLatestFrame = await apiGet("/api/watch/frame/latest");
     const livekit = await apiGet("/api/livekit/status");
     const livekitTokenInvalidSource = await apiPost("/api/livekit/token", { sourceId: "invalid-source" });
@@ -138,6 +139,7 @@ describe("api read-only smoke", () => {
     expect(tasks.status).toBe(200);
     expect(macApps.status).toBe(200);
     expect(watchSources.status).toBe(200);
+    expect(liveSnapshotFiltered.status).toBe(200);
     expect(watchLatestFrame.status).toBe(200);
     expect(livekit.status).toBe(200);
     expect(livekitTokenInvalidSource.status).toBe(400);
@@ -147,6 +149,7 @@ describe("api read-only smoke", () => {
     expect((tasks.body as Record<string, unknown>).ok).toBe(true);
     expect(Array.isArray((macApps.body as Record<string, unknown>).apps)).toBe(true);
     expect(Array.isArray((watchSources.body as Record<string, unknown>).sources)).toBe(true);
+    expect(Array.isArray((liveSnapshotFiltered.body as Record<string, unknown>).events)).toBe(true);
     expect((watchLatestFrame.body as Record<string, unknown>).ok).toBe(true);
     expect((livekit.body as Record<string, unknown>).ok).toBe(true);
     expect((livekitTokenInvalidSource.body as Record<string, unknown>).ok).toBe(false);

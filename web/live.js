@@ -9,6 +9,14 @@ const pinnedTaskId = (query.get("taskId") || "").trim();
 
 const $ = (id) => document.getElementById(id);
 
+const buildFilterQuery = () => {
+  const params = new URLSearchParams();
+  if (pinnedSessionId) params.set("sessionId", pinnedSessionId);
+  if (pinnedSourceId) params.set("sourceId", pinnedSourceId);
+  if (pinnedTaskId) params.set("taskId", pinnedTaskId);
+  return params.toString();
+};
+
 const updateFilterLabel = () => {
   const node = $("live-filter");
   if (!node) return;
@@ -122,7 +130,8 @@ const connectSse = () => {
     source.close();
   }
   setConnectionState(false, "Connecting SSE...");
-  source = new EventSource("/api/live/events");
+  const filterQuery = buildFilterQuery();
+  source = new EventSource(filterQuery ? `/api/live/events?${filterQuery}` : "/api/live/events");
 
   source.onopen = () => {
     setConnectionState(true, "Live stream connected");
@@ -158,7 +167,9 @@ const connectWebSocket = () => {
     socket.close();
   }
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  socket = new WebSocket(`${protocol}://${window.location.host}/api/live/ws`);
+  const filterQuery = buildFilterQuery();
+  const wsPath = filterQuery ? `/api/live/ws?${filterQuery}` : "/api/live/ws";
+  socket = new WebSocket(`${protocol}://${window.location.host}${wsPath}`);
 
   socket.onopen = () => {
     setConnectionState(true, "WebSocket live connected");
@@ -194,7 +205,8 @@ const connectWebSocket = () => {
 
 const loadSnapshot = async () => {
   try {
-    const response = await fetch("/api/live/snapshot");
+    const filterQuery = buildFilterQuery();
+    const response = await fetch(filterQuery ? `/api/live/snapshot?${filterQuery}` : "/api/live/snapshot");
     const parsed = await response.json();
     const rows = Array.isArray(parsed?.events) ? parsed.events : [];
     events.splice(0, events.length, ...rows.slice(-MAX_EVENTS));
