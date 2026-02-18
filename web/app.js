@@ -474,9 +474,61 @@ const renderCoworkTaskBoard = () => {
   });
 };
 
+const readSelectedWatchSessionId = () => {
+  const selectValue = ($("watch-session-select")?.value || "").trim();
+  if (selectValue) {
+    return selectValue;
+  }
+  return ($("watch-session-id")?.value || "").trim();
+};
+
+const syncWatchSessionSelection = (sessionId) => {
+  const normalized = String(sessionId || "").trim();
+  if ($("watch-session-id")) {
+    $("watch-session-id").value = normalized;
+  }
+  const select = $("watch-session-select");
+  if (!select) {
+    return;
+  }
+  if (!normalized) {
+    select.value = "";
+    return;
+  }
+  const exists = [...select.options].some((option) => option.value === normalized);
+  if (exists) {
+    select.value = normalized;
+  }
+};
+
+const renderWatchSessionOptions = () => {
+  const select = $("watch-session-select");
+  if (!select) {
+    return;
+  }
+  const activeSessions = Array.isArray(state.coworkState?.active?.watchSessions) ? state.coworkState.active.watchSessions : [];
+  const current = readSelectedWatchSessionId();
+  select.innerHTML = "";
+  const autoOption = document.createElement("option");
+  autoOption.value = "";
+  autoOption.textContent = "auto (most recent active)";
+  select.appendChild(autoOption);
+  activeSessions.forEach((session) => {
+    const option = document.createElement("option");
+    option.value = session.id;
+    option.textContent = `${session.id} • ${session.sourceId}${session.taskId ? ` • ${session.taskId}` : ""}`;
+    select.appendChild(option);
+  });
+  if (current && activeSessions.some((session) => session.id === current)) {
+    select.value = current;
+  } else {
+    select.value = "";
+  }
+};
+
 const resolveActiveWatchSession = () => {
   const activeSessions = Array.isArray(state.coworkState?.active?.watchSessions) ? state.coworkState.active.watchSessions : [];
-  const selectedSessionId = ($("watch-session-id")?.value || "").trim();
+  const selectedSessionId = readSelectedWatchSessionId();
   if (selectedSessionId) {
     const selected = activeSessions.find((session) => session.id === selectedSessionId);
     if (selected) {
@@ -511,6 +563,11 @@ const renderWatchObserverMeta = () => {
     return;
   }
   const session = resolveActiveWatchSession();
+  const selectedSessionId = readSelectedWatchSessionId();
+  if (!session && selectedSessionId) {
+    node.textContent = `Selected session ${selectedSessionId} is not active.`;
+    return;
+  }
   if (!session) {
     node.textContent = "No active watch session.";
     return;
@@ -530,9 +587,7 @@ const startWatchSessionFlow = async ({ sourceId, taskId, fps, outputId = "mac-po
     fps: typeof fps === "number" && Number.isFinite(fps) ? fps : undefined,
   });
   setText(outputId, result);
-  if ($("watch-session-id") && result?.session?.id) {
-    $("watch-session-id").value = result.session.id;
-  }
+  syncWatchSessionSelection(result?.session?.id || "");
   setText("watch-output", {
     session: result?.session || null,
     remoteTransport: result?.remoteTransport || null,
@@ -552,7 +607,7 @@ const startWatchSessionFlow = async ({ sourceId, taskId, fps, outputId = "mac-po
 
 const mintLivekitViewerToken = async (outputId = "watch-output") => {
   const activeSession = resolveActiveWatchSession();
-  const sessionId = ($("watch-session-id")?.value || activeSession?.id || "").trim();
+  const sessionId = (readSelectedWatchSessionId() || activeSession?.id || "").trim();
   const sourceId = ($("watch-source-select")?.value || activeSession?.sourceId || "embedded-browser").trim();
   const taskId = ($("task-id")?.value || activeSession?.taskId || "").trim();
   const result = await apiPost("/api/livekit/token", {
@@ -583,6 +638,7 @@ const mintLivekitViewerToken = async (outputId = "watch-output") => {
 const refreshCoworkState = async () => {
   const result = await apiGet("/api/cowork/state");
   state.coworkState = result || null;
+  renderWatchSessionOptions();
   renderCoworkMetrics();
   renderWatchObserverMeta();
   setText("cowork-state-output", result);
@@ -692,6 +748,7 @@ const refreshMacApps = async () => {
       watchSelect.value = availableSourceIds[0];
     }
   }
+  renderWatchSessionOptions();
   renderWatchObserverMeta();
   return {
     apps,
@@ -2509,7 +2566,7 @@ const bindDashboardEvents = () => {
   });
 
   $("watch-stop")?.addEventListener("click", async () => {
-    const sessionId = ($("watch-session-id")?.value || "").trim();
+    const sessionId = (readSelectedWatchSessionId() || resolveActiveWatchSession()?.id || "").trim();
     if (!sessionId) {
       setText("mac-policy-output", "Watch session ID is required.");
       return;
@@ -2521,6 +2578,9 @@ const bindDashboardEvents = () => {
       setText("mac-policy-output", result);
       await refreshMacApps();
       await refreshCoworkState();
+      if ((readSelectedWatchSessionId() || "").trim() === sessionId) {
+        syncWatchSessionSelection("");
+      }
       renderWatchObserverMeta();
       if (!resolveActiveWatchSession()) {
         setObserverIframeSession(null);
@@ -2531,10 +2591,34 @@ const bindDashboardEvents = () => {
   });
 
   $("watch-session-id")?.addEventListener("change", () => {
+    const value = ($("watch-session-id")?.value || "").trim();
+    syncWatchSessionSelection(value);
+    renderWatchSessionOptions();
     renderWatchObserverMeta();
     const session = resolveActiveWatchSession();
     if (session) {
       setObserverIframeSession(session);
+    } else if (!value) {
+      setObserverIframeSession(null);
+    }
+  });
+
+  $("watch-session-select")?.addEventListener("change", () => {
+    const selected = ($("watch-session-select")?.value || "").trim();
+    syncWatchSessionSelection(selected);
+    renderWatchObserverMeta();
+    const session = resolveActiveWatchSession();
+    if (session) {
+      setObserverIframeSession(session);
+      return;
+    }
+    if (!selected) {
+      const fallback = resolveActiveWatchSession();
+      if (fallback) {
+        setObserverIframeSession(fallback);
+      } else {
+        setObserverIframeSession(null);
+      }
     }
   });
 
