@@ -60,8 +60,24 @@ final class LocalServerManager: ObservableObject {
         lastOutput = "Bundled server exists but Node is unavailable. Set POD_NODE_PATH."
         return
       }
+      let nodeModulesPath = URL(fileURLWithPath: rootPath, isDirectory: true).appendingPathComponent("node_modules").path
+      var isNodeModulesDir: ObjCBool = false
+      if !FileManager.default.fileExists(atPath: nodeModulesPath, isDirectory: &isNodeModulesDir) || !isNodeModulesDir.boolValue {
+        statusText = "missing node_modules"
+        lastOutput =
+          "Bundled server requires node_modules for native dependencies.\n\nMissing: \(nodeModulesPath)\n\nSet Project Root to your repo and run: bun install\n"
+        return
+      }
+      if !FileManager.default.fileExists(atPath: "\(nodeModulesPath)/better-sqlite3") {
+        statusText = "missing better-sqlite3"
+        lastOutput =
+          "Bundled server requires better-sqlite3.\n\nMissing: \(nodeModulesPath)/better-sqlite3\n\nFrom Project Root: bun install\n"
+        return
+      }
       newProcess.executableURL = URL(fileURLWithPath: nodePath)
       newProcess.arguments = [serverPath]
+      appendOutput("Project root: \(rootPath)\n")
+      appendOutput("Node: \(nodePath)\n")
       appendOutput("Using bundled server at \(serverPath)\n")
     } else {
       guard let bunPath = resolveBunPath() else {
@@ -86,6 +102,7 @@ final class LocalServerManager: ObservableObject {
     } else if !existingNodePath.split(separator: ":").contains(Substring(nodeModulesPath)) {
       env["NODE_PATH"] = "\(nodeModulesPath):\(existingNodePath)"
     }
+    appendOutput("NODE_PATH: \(env["NODE_PATH"] ?? "")\n")
     newProcess.environment = env
 
     let out = Pipe()
@@ -201,7 +218,30 @@ final class LocalServerManager: ObservableObject {
       return fromEnv
     }
 
+    #if arch(arm64)
+      let preferArm64 = true
+    #else
+      let preferArm64 = false
+    #endif
+
+    let nvmDir = env["NVM_DIR"] ?? NSString(string: "~/.nvm").expandingTildeInPath
+    if preferArm64 {
+      let defaultAlias = "\(nvmDir)/alias/default"
+      if let versionRaw = try? String(contentsOfFile: defaultAlias, encoding: .utf8) {
+        let version = versionRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !version.isEmpty {
+          let candidate = "\(nvmDir)/versions/node/\(version)/bin/node"
+          if FileManager.default.isExecutableFile(atPath: candidate), nodeSupportsArm64(candidate) {
+            return candidate
+          }
+        }
+      }
+    }
+
     for candidate in nodeCandidates where FileManager.default.isExecutableFile(atPath: candidate) {
+      if preferArm64 && !nodeSupportsArm64(candidate) {
+        continue
+      }
       return candidate
     }
 
@@ -209,10 +249,33 @@ final class LocalServerManager: ObservableObject {
     for segment in pathValue.split(separator: ":") {
       let candidate = "\(segment)/node"
       if FileManager.default.isExecutableFile(atPath: candidate) {
+        if preferArm64 && !nodeSupportsArm64(candidate) {
+          continue
+        }
         return candidate
       }
     }
     return nil
+  }
+
+  private func nodeSupportsArm64(_ candidate: String) -> Bool {
+    let checker = Process()
+    checker.executableURL = URL(fileURLWithPath: "/usr/bin/file")
+    checker.arguments = [candidate]
+    let out = Pipe()
+    checker.standardOutput = out
+    checker.standardError = Pipe()
+    do {
+      try checker.run()
+      checker.waitUntilExit()
+      let data = out.fileHandleForReading.readDataToEndOfFile()
+      guard let text = String(data: data, encoding: .utf8) else {
+        return false
+      }
+      return text.contains("arm64")
+    } catch {
+      return false
+    }
   }
 
   private func isPortListening(_ port: Int) -> Bool {

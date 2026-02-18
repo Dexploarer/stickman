@@ -61,6 +61,7 @@ SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
 APP_ROOT="\$(cd "\$SCRIPT_DIR/.." && pwd)"
 SERVER_BUNDLE="\$APP_ROOT/Resources/server.mjs"
 export POD_SUITE_ROOT="\${POD_SUITE_ROOT:-$PROJECT_ROOT}"
+export NODE_PATH="\${NODE_PATH:-\$POD_SUITE_ROOT/node_modules}"
 
 NODE_BIN="\${POD_NODE_PATH}"
 if [[ ! -x "\$NODE_BIN" ]]; then
