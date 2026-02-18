@@ -147,6 +147,14 @@ Environment knobs for smoke:
 - `SMOKE_BASE_URL` (optional; if set to an existing server, no new server is started)
 - `SMOKE_TIMEOUT_SECONDS` (default `30`)
 
+Optional LiveKit env (for remote cowork transport):
+
+- `LIVEKIT_WS_URL`
+- `LIVEKIT_API_KEY`
+- `LIVEKIT_API_SECRET`
+- `LIVEKIT_ROOM_PREFIX`
+- `LIVEKIT_STREAM_MODE` (`events_only` or `events_and_frames`)
+
 ## Native Apple App (Swift)
 
 ```bash
@@ -206,6 +214,8 @@ This creates and launches:
 - `POST /api/watch/start`
 - `POST /api/watch/stop`
 - `POST /api/watch/frame`
+- `GET /api/livekit/status`
+- `POST /api/livekit/config`
 - `GET /api/code/status`
 - `POST /api/code/plan`
 - `POST /api/code/exec`

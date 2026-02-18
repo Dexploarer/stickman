@@ -471,6 +471,26 @@
               <button class="ghost" type="button" id="watch-start">Start Watch</button>
               <button class="ghost" type="button" id="watch-stop">Stop Watch</button>
             </div>
+            <h3>LiveKit Remote Bridge (Optional)</h3>
+            <div class="toggle-row">
+              <label><input id="livekit-enabled" type="checkbox" /> enable livekit remote transport</label>
+            </div>
+            <label>LiveKit WS URL</label>
+            <input id="livekit-ws-url" type="text" placeholder="wss://your-livekit-host" />
+            <label>LiveKit API Key</label>
+            <input id="livekit-api-key" type="text" placeholder="LIVEKIT_API_KEY" />
+            <label>Room Prefix</label>
+            <input id="livekit-room-prefix" type="text" placeholder="milady-cowork" />
+            <label>Stream Mode</label>
+            <select id="livekit-stream-mode">
+              <option value="events_only">events_only</option>
+              <option value="events_and_frames">events_and_frames</option>
+            </select>
+            <div class="button-row">
+              <button class="ghost" type="button" id="livekit-refresh">Refresh LiveKit</button>
+              <button class="ghost" type="button" id="livekit-save">Save LiveKit</button>
+            </div>
+            <pre id="livekit-output"></pre>
             <pre id="mac-policy-output"></pre>
           </article>
         </aside>

@@ -13,6 +13,9 @@ describe("config/defaultOnboardingState", () => {
     expect(defaults.autonomy.policy).toBe("mixed_auto");
     expect(defaults.watch.mode).toBe("screenshare");
     expect(defaults.watch.captureScope).toBe("agent_surfaces_only");
+    expect(defaults.livekit.enabled).toBe(false);
+    expect(defaults.livekit.streamMode).toBe("events_only");
+    expect(defaults.livekit.roomPrefix.length).toBeGreaterThan(0);
   });
 
   it("enables all catalog skills by default", () => {

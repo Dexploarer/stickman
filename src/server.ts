@@ -34,7 +34,19 @@ import { getSkillDefinition, skillCatalog } from "./skills/catalog.js";
 import { executeSkill } from "./skills/executor.js";
 import { focusMacApp, listKnownMacApps, openMacApp } from "./skills/mac-actions.js";
 import type { SkillExecutionInput } from "./skills/types.js";
-import type { ApprovalItem, MacAppId, SkillId, TaskRun, TaskStatus, WatchSession, WatchSource, XArgMap, XRunRequest, XRunResult } from "./types.js";
+import type {
+  ApprovalItem,
+  MacAppId,
+  OnboardingState,
+  SkillId,
+  TaskRun,
+  TaskStatus,
+  WatchSession,
+  WatchSource,
+  XArgMap,
+  XRunRequest,
+  XRunResult,
+} from "./types.js";
 import { xEndpointCatalog } from "./x/catalog.js";
 import { runXEndpoint } from "./x/runner.js";
 
@@ -768,6 +780,59 @@ const startWatchSession = (input: { sourceId: WatchSource["id"]; taskId?: string
   }, intervalMs);
   watchTimers.set(session.id, timer);
   return session;
+};
+
+const normalizeLivekitWsUrl = (value: string | undefined): string | undefined => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (trimmed.startsWith("wss://") || trimmed.startsWith("ws://")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("https://")) {
+    return `wss://${trimmed.slice("https://".length)}`;
+  }
+  if (trimmed.startsWith("http://")) {
+    return `ws://${trimmed.slice("http://".length)}`;
+  }
+  return undefined;
+};
+
+const resolveLivekitStatus = (onboarding: OnboardingState) => {
+  const wsUrl = normalizeLivekitWsUrl(onboarding.livekit.wsUrl || appConfig.livekit.wsUrl);
+  const apiKey = String(onboarding.livekit.apiKey || appConfig.livekit.apiKey || "").trim();
+  const roomPrefix = String(onboarding.livekit.roomPrefix || appConfig.livekit.roomPrefix || "milady-cowork").trim();
+  const streamMode = onboarding.livekit.streamMode === "events_and_frames" ? "events_and_frames" : "events_only";
+  const apiSecretSet = Boolean(appConfig.livekit.apiSecret);
+  const enabled = Boolean(onboarding.livekit.enabled);
+  const missing: Array<"ws_url" | "api_key" | "api_secret"> = [];
+  if (!wsUrl) {
+    missing.push("ws_url");
+  }
+  if (!apiKey) {
+    missing.push("api_key");
+  }
+  if (!apiSecretSet) {
+    missing.push("api_secret");
+  }
+  const configured = missing.length === 0;
+  const mode = enabled ? (configured ? "ready" : "needs_config") : "disabled";
+  return {
+    enabled,
+    mode,
+    configured,
+    missing,
+    wsUrl: wsUrl || null,
+    apiKeySet: Boolean(apiKey),
+    apiSecretSet,
+    roomPrefix,
+    streamMode,
+    guidance:
+      configured && enabled
+        ? "LiveKit is ready for optional remote cowork transport."
+        : "Set wsUrl, apiKey, and LIVEKIT_API_SECRET to enable remote LiveKit streaming.",
+  };
 };
 
 const isSkillEnabled = (skillId: SkillId, enabledMap: Partial<Record<SkillId, boolean>>): boolean => {
@@ -2499,6 +2564,7 @@ app.get("/api/cowork/state", async (_req, res) => {
     cancelled: tasks.filter((item) => item.status === "cancelled").length,
   };
   const enabledSkillCount = skillCatalog.filter((skill) => isSkillEnabled(skill.id, onboarding.skills.enabled || {})).length;
+  const livekit = resolveLivekitStatus(onboarding);
   res.json({
     ok: true,
     summary: {
@@ -2510,6 +2576,12 @@ app.get("/api/cowork/state", async (_req, res) => {
       watch: {
         active: activeWatchSessions.length,
         total: watchSessions.size,
+      },
+      livekit: {
+        enabled: livekit.enabled,
+        configured: livekit.configured,
+        mode: livekit.mode,
+        streamMode: livekit.streamMode,
       },
       autonomy: {
         enabled: autonomyState.enabled,
@@ -2534,6 +2606,68 @@ app.get("/api/cowork/state", async (_req, res) => {
         })),
       watchSessions: activeWatchSessions,
     },
+  });
+});
+
+app.get("/api/livekit/status", async (_req, res) => {
+  const onboarding = await getOnboardingState();
+  const status = resolveLivekitStatus(onboarding);
+  res.json({
+    ok: true,
+    livekit: status,
+  });
+});
+
+app.post("/api/livekit/config", async (req, res) => {
+  const patch: Partial<OnboardingState["livekit"]> = {};
+  if (typeof req.body?.enabled === "boolean") {
+    patch.enabled = req.body.enabled;
+  }
+  if (typeof req.body?.wsUrl === "string") {
+    const wsUrl = normalizeLivekitWsUrl(req.body.wsUrl);
+    if (!wsUrl && req.body.wsUrl.trim() !== "") {
+      res.status(400).json({ ok: false, error: "wsUrl must be ws://, wss://, http://, or https:// format." });
+      return;
+    }
+    patch.wsUrl = wsUrl;
+  }
+  if (typeof req.body?.apiKey === "string") {
+    const apiKey = req.body.apiKey.trim();
+    patch.apiKey = apiKey || undefined;
+  }
+  if (typeof req.body?.roomPrefix === "string") {
+    const roomPrefix = req.body.roomPrefix.trim();
+    if (roomPrefix && !/^[a-zA-Z0-9._-]{2,64}$/.test(roomPrefix)) {
+      res
+        .status(400)
+        .json({ ok: false, error: "roomPrefix must be 2-64 chars using letters, numbers, dot, dash, or underscore." });
+      return;
+    }
+    patch.roomPrefix = roomPrefix || "milady-cowork";
+  }
+  if (typeof req.body?.streamMode === "string") {
+    const streamMode = req.body.streamMode.trim();
+    if (!["events_only", "events_and_frames"].includes(streamMode)) {
+      res.status(400).json({ ok: false, error: "streamMode must be events_only or events_and_frames." });
+      return;
+    }
+    patch.streamMode = streamMode as "events_only" | "events_and_frames";
+  }
+
+  const onboarding = await saveOnboardingState({
+    livekit: patch,
+  } as Parameters<typeof saveOnboardingState>[0]);
+  const status = resolveLivekitStatus(onboarding);
+  emitLiveEvent("livekit_config_updated", {
+    enabled: status.enabled,
+    configured: status.configured,
+    mode: status.mode,
+    streamMode: status.streamMode,
+    roomPrefix: status.roomPrefix,
+  });
+  res.json({
+    ok: true,
+    livekit: status,
   });
 });
 

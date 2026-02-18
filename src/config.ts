@@ -48,6 +48,13 @@ const normalizePordieScope = (value: string | undefined): PordieScope | undefine
   return undefined;
 };
 
+const normalizeLivekitStreamMode = (value: string | undefined): "events_only" | "events_and_frames" => {
+  if (value === "events_only" || value === "events_and_frames") {
+    return value;
+  }
+  return "events_only";
+};
+
 export const appConfig = {
   port: Number(process.env.PORT || 8787),
   claude: {
@@ -82,6 +89,13 @@ export const appConfig = {
     intervalMinutes: Math.max(1, Number(process.env.HEARTBEAT_INTERVAL_MINUTES || 20)),
     fetchLimit: Math.max(5, Number(process.env.HEARTBEAT_FETCH_LIMIT || 40)),
     autoAct: toBool(process.env.HEARTBEAT_AUTO_ACT, true),
+  },
+  livekit: {
+    wsUrl: toOptional(process.env.LIVEKIT_WS_URL),
+    apiKey: toOptional(process.env.LIVEKIT_API_KEY),
+    apiSecret: toOptional(process.env.LIVEKIT_API_SECRET),
+    roomPrefix: process.env.LIVEKIT_ROOM_PREFIX || "milady-cowork",
+    streamMode: normalizeLivekitStreamMode(process.env.LIVEKIT_STREAM_MODE),
   },
 };
 
@@ -180,6 +194,13 @@ export const defaultOnboardingState = (): OnboardingState => ({
     mode: "screenshare",
     fps: 2,
     captureScope: "agent_surfaces_only",
+  },
+  livekit: {
+    enabled: false,
+    wsUrl: appConfig.livekit.wsUrl,
+    apiKey: appConfig.livekit.apiKey,
+    roomPrefix: appConfig.livekit.roomPrefix,
+    streamMode: appConfig.livekit.streamMode,
   },
   pordie: {
     enabled: appConfig.pordie.enabled,

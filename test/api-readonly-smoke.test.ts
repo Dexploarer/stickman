@@ -108,18 +108,21 @@ describe("api read-only smoke", () => {
     const tasks = await apiGet("/api/agent/tasks");
     const macApps = await apiGet("/api/mac/apps");
     const watchSources = await apiGet("/api/watch/sources");
+    const livekit = await apiGet("/api/livekit/status");
     const codeStatus = await apiGet("/api/code/status");
     const wsUpgrade = await apiGet("/api/live/ws");
 
     expect(tasks.status).toBe(200);
     expect(macApps.status).toBe(200);
     expect(watchSources.status).toBe(200);
+    expect(livekit.status).toBe(200);
     expect(codeStatus.status).toBe(200);
     expect(wsUpgrade.status).toBe(426);
 
     expect((tasks.body as Record<string, unknown>).ok).toBe(true);
     expect(Array.isArray((macApps.body as Record<string, unknown>).apps)).toBe(true);
     expect(Array.isArray((watchSources.body as Record<string, unknown>).sources)).toBe(true);
+    expect((livekit.body as Record<string, unknown>).ok).toBe(true);
     expect((codeStatus.body as Record<string, unknown>).ok).toBe(true);
     expect((wsUpgrade.body as Record<string, unknown>).ok).toBe(false);
   });

@@ -155,6 +155,14 @@ export interface OnboardingWatch {
   captureScope: "agent_surfaces_only";
 }
 
+export interface OnboardingLivekit {
+  enabled: boolean;
+  wsUrl?: string;
+  apiKey?: string;
+  roomPrefix: string;
+  streamMode: "events_only" | "events_and_frames";
+}
+
 export interface OnboardingState {
   completed: boolean;
   updatedAt: string | null;
@@ -167,6 +175,7 @@ export interface OnboardingState {
   skills: OnboardingSkills;
   macControl: OnboardingMacControl;
   watch: OnboardingWatch;
+  livekit: OnboardingLivekit;
   pordie: OnboardingPordie;
 }
 

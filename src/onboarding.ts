@@ -68,6 +68,10 @@ const mergeOnboarding = (base: OnboardingState, patch: Partial<OnboardingState>)
       ...base.watch,
       ...(patch.watch || {}),
     },
+    livekit: {
+      ...base.livekit,
+      ...(patch.livekit || {}),
+    },
     pordie: {
       ...base.pordie,
       ...(patch.pordie || {}),

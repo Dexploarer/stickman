@@ -120,6 +120,8 @@ req mac_policy_get GET /api/mac/policy 200
 req mac_open_denied POST /api/mac/apps/open 403 '{"appId":"unknown"}'
 req mac_focus_denied POST /api/mac/apps/focus 403 '{"appId":"unknown"}'
 req watch_sources GET /api/watch/sources 200
+req livekit_status GET /api/livekit/status 200
+req livekit_config POST /api/livekit/config 200 '{"enabled":false,"streamMode":"events_only","roomPrefix":"milady-cowork"}'
 req watch_start_invalid POST /api/watch/start 400 '{"sourceId":"invalid-source"}'
 req watch_start_valid POST /api/watch/start 200 '{"sourceId":"embedded-browser"}'
 

@@ -24,6 +24,7 @@ const state = {
   taskLogs: [],
   macApps: [],
   watchSources: [],
+  livekitStatus: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -589,6 +590,29 @@ const refreshMacApps = async () => {
     policy,
     watch,
   };
+};
+
+const refreshLivekitStatus = async () => {
+  const result = await apiGet("/api/livekit/status");
+  state.livekitStatus = result?.livekit || null;
+  if ($("livekit-enabled")) {
+    $("livekit-enabled").checked = Boolean(result?.livekit?.enabled);
+  }
+  if ($("livekit-ws-url")) {
+    $("livekit-ws-url").value = result?.livekit?.wsUrl || "";
+  }
+  if ($("livekit-api-key")) {
+    $("livekit-api-key").value = result?.livekit?.apiKeySet ? $("livekit-api-key").value || "" : "";
+  }
+  if ($("livekit-room-prefix")) {
+    $("livekit-room-prefix").value = result?.livekit?.roomPrefix || "milady-cowork";
+  }
+  if ($("livekit-stream-mode")) {
+    $("livekit-stream-mode").value =
+      result?.livekit?.streamMode === "events_and_frames" ? "events_and_frames" : "events_only";
+  }
+  setText("livekit-output", result);
+  return result;
 };
 
 const runCoworkQuickAction = async (action) => {
@@ -2364,6 +2388,36 @@ const bindDashboardEvents = () => {
     }
   });
 
+  $("livekit-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshLivekitStatus();
+    } catch (error) {
+      setText("livekit-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("livekit-save")?.addEventListener("click", async () => {
+    const enabled = Boolean($("livekit-enabled")?.checked);
+    const wsUrl = ($("livekit-ws-url")?.value || "").trim();
+    const apiKey = ($("livekit-api-key")?.value || "").trim();
+    const roomPrefix = ($("livekit-room-prefix")?.value || "").trim();
+    const streamMode = ($("livekit-stream-mode")?.value || "").trim();
+    try {
+      const result = await apiPost("/api/livekit/config", {
+        enabled,
+        wsUrl,
+        apiKey: apiKey || undefined,
+        roomPrefix: roomPrefix || undefined,
+        streamMode,
+      });
+      setText("livekit-output", result);
+      await refreshLivekitStatus();
+      await refreshCoworkState();
+    } catch (error) {
+      setText("livekit-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
   $("endpoint-filter")?.addEventListener("input", renderEndpointOptions);
   $("endpoint-select")?.addEventListener("change", renderEndpointArgs);
   [
@@ -2773,6 +2827,7 @@ const boot = async () => {
   await refreshCoworkState();
   await refreshCoworkMissions();
   await refreshMacApps();
+  await refreshLivekitStatus();
   await refreshTaskLogTail();
   setInterval(async () => {
     try {
