@@ -79,6 +79,13 @@ if ! wait_for_health; then
 fi
 
 req health GET /api/health 200
+req workbench_workspace_tree GET "/api/workspace/tree?path=src" 200
+req workbench_workspace_file GET "/api/workspace/file?path=src%2Fconfig.ts" 200
+req workbench_git_status GET /api/git/status 200
+req workbench_git_log GET "/api/git/log?limit=5" 200
+req workbench_git_diff GET "/api/git/diff?staged=0" 200
+req workbench_git_action_dry_run POST /api/git/actions 200 '{"mode":"dry_run","action":"create_branch","params":{"name":"codex/smoke-workbench","checkout":true}}'
+req workbench_git_action_execute_missing_token POST /api/git/actions 409 '{"mode":"execute","action":"create_branch","params":{"name":"codex/smoke-workbench","checkout":true}}'
 req providers_status GET /api/providers/status 200
 req integrations_status GET /api/integrations/status 200
 req integrations_actions_catalog GET /api/integrations/actions/catalog 200

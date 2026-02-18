@@ -32,6 +32,17 @@ const state = {
   integrationBridgeStatus: null,
   terminalSessions: [],
   terminalActiveSessionId: "",
+  workspaceTreeEntries: [],
+  workspaceFileSha256: "",
+  workspaceFileConfirmToken: "",
+  gitStatus: null,
+  gitConfirmTokens: {
+    create_branch: "",
+    commit: "",
+    push: "",
+  },
+  terminalPtySessions: [],
+  terminalPtyActiveSessionId: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -558,6 +569,361 @@ const runEmbeddedTerminalCommand = async (command, cwd) => {
   return result;
 };
 
+const normalizeWorkbenchRelPath = (raw) => {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  const withSlashes = trimmed.replace(/\\/g, "/");
+  const noLeading = withSlashes.replace(/^\/+/, "");
+  const noTrailing = noLeading.replace(/\/+$/, "");
+  if (noTrailing === "." || noTrailing === "./") {
+    return "";
+  }
+  return noTrailing;
+};
+
+const parentWorkbenchRelDir = (relDirRaw) => {
+  const relDir = normalizeWorkbenchRelPath(relDirRaw);
+  if (!relDir) {
+    return "";
+  }
+  const parts = relDir.split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
+};
+
+const refreshWorkspaceTree = async () => {
+  const relDir = normalizeWorkbenchRelPath($("workspace-tree-path")?.value || "");
+  const result = await apiGet(`/api/workspace/tree?path=${encodeURIComponent(relDir)}`);
+  state.workspaceTreeEntries = Array.isArray(result?.entries) ? result.entries : [];
+  renderWorkspaceTree();
+  setText("workspace-file-output", result);
+  return result;
+};
+
+const renderWorkspaceTree = () => {
+  const container = $("workspace-tree");
+  if (!container) {
+    return;
+  }
+  container.innerHTML = "";
+  const entries = Array.isArray(state.workspaceTreeEntries) ? state.workspaceTreeEntries : [];
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "history-item";
+    empty.textContent = "No entries found.";
+    container.appendChild(empty);
+    return;
+  }
+  entries.forEach((entry) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost";
+    button.dataset.workspacePath = entry.relPath;
+    button.dataset.workspaceType = entry.type;
+    const prefix = entry.type === "dir" ? "[dir]" : "[file]";
+    button.textContent = `${prefix} ${entry.name}`;
+    container.appendChild(button);
+  });
+};
+
+const loadWorkspaceFile = async (relPathRaw) => {
+  const relPath = normalizeWorkbenchRelPath(relPathRaw || $("workspace-file-path")?.value || "");
+  if (!relPath) {
+    throw new Error("File path is required.");
+  }
+  if ($("workspace-file-path")) {
+    $("workspace-file-path").value = relPath;
+  }
+  const result = await apiGet(`/api/workspace/file?path=${encodeURIComponent(relPath)}`);
+  if ($("workspace-file-content")) {
+    $("workspace-file-content").value = String(result?.content || "");
+  }
+  state.workspaceFileSha256 = String(result?.sha256 || "");
+  state.workspaceFileConfirmToken = "";
+  setText("workspace-file-output", result);
+  return result;
+};
+
+const dryRunWorkspaceSave = async () => {
+  const relPath = normalizeWorkbenchRelPath($("workspace-file-path")?.value || "");
+  if (!relPath) {
+    throw new Error("File path is required.");
+  }
+  const content = $("workspace-file-content")?.value || "";
+  const baseSha256 = String(state.workspaceFileSha256 || "").trim();
+  const result = await apiPost("/api/workspace/file", {
+    mode: "dry_run",
+    path: relPath,
+    content,
+    baseSha256,
+  });
+  state.workspaceFileConfirmToken = String(result?.confirmToken || "");
+  setText("workspace-file-output", result);
+  return result;
+};
+
+const executeWorkspaceSave = async () => {
+  const relPath = normalizeWorkbenchRelPath($("workspace-file-path")?.value || "");
+  if (!relPath) {
+    throw new Error("File path is required.");
+  }
+  const content = $("workspace-file-content")?.value || "";
+  const baseSha256 = String(state.workspaceFileSha256 || "").trim();
+  const confirmToken = String(state.workspaceFileConfirmToken || "").trim();
+  if (!confirmToken) {
+    throw new Error("Missing confirm token. Run Dry-run Save first.");
+  }
+  const result = await apiPost("/api/workspace/file", {
+    mode: "execute",
+    path: relPath,
+    content,
+    baseSha256,
+    confirmToken,
+  });
+  state.workspaceFileSha256 = String(result?.result?.sha256 || state.workspaceFileSha256 || "");
+  state.workspaceFileConfirmToken = "";
+  setText("workspace-file-output", result);
+  return result;
+};
+
+const refreshGitStatus = async () => {
+  const result = await apiGet("/api/git/status");
+  state.gitStatus = result || null;
+  setText("git-status-output", result);
+  return result;
+};
+
+const refreshGitLog = async () => {
+  const result = await apiGet("/api/git/log?limit=50");
+  setText("git-action-output", result);
+  return result;
+};
+
+const refreshGitDiff = async (staged, pathRaw) => {
+  const relPath = normalizeWorkbenchRelPath(pathRaw || $("git-diff-path")?.value || "");
+  const query = new URLSearchParams();
+  query.set("staged", staged ? "1" : "0");
+  if (relPath) {
+    query.set("path", relPath);
+  }
+  const result = await apiGet(`/api/git/diff?${query.toString()}`);
+  setText("git-diff-output", result);
+  return result;
+};
+
+const collectGitActionParams = (action) => {
+  if (action === "create_branch") {
+    const name = ($("git-branch-name")?.value || "").trim();
+    return { name, checkout: true };
+  }
+  if (action === "commit") {
+    const message = ($("git-commit-message")?.value || "").trim();
+    const addAll = Boolean($("git-commit-addall")?.checked);
+    return { message, addAll };
+  }
+  if (action === "push") {
+    const setUpstream = Boolean($("git-push-upstream")?.checked);
+    return { remote: "origin", setUpstream };
+  }
+  return {};
+};
+
+const dryRunGitAction = async (action) => {
+  const params = collectGitActionParams(action);
+  const result = await apiPost("/api/git/actions", {
+    mode: "dry_run",
+    action,
+    params,
+  });
+  state.gitConfirmTokens[action] = String(result?.confirmToken || "");
+  setText("git-action-output", result);
+  await refreshGitStatus();
+  return result;
+};
+
+const executeGitAction = async (action) => {
+  const params = collectGitActionParams(action);
+  const confirmToken = String(state.gitConfirmTokens[action] || "").trim();
+  if (!confirmToken) {
+    throw new Error("Missing confirm token. Run dry-run first.");
+  }
+  const result = await apiPost("/api/git/actions", {
+    mode: "execute",
+    action,
+    params,
+    confirmToken,
+  });
+  state.gitConfirmTokens[action] = "";
+  setText("git-action-output", result);
+  await refreshGitStatus();
+  return result;
+};
+
+let terminalPtyWs = null;
+
+const appendTerminalPtyOutput = (chunk) => {
+  const node = $("terminal-pty-output");
+  if (!node) {
+    return;
+  }
+  const next = `${node.textContent || ""}${String(chunk || "")}`;
+  node.textContent = next.slice(Math.max(0, next.length - 200_000));
+  node.scrollTop = node.scrollHeight;
+};
+
+const refreshTerminalPtySessions = async () => {
+  const result = await apiGet("/api/terminal/sessions");
+  state.terminalPtySessions = Array.isArray(result?.sessions) ? result.sessions : [];
+  const select = $("terminal-pty-session-select");
+  if (select) {
+    const current = state.terminalPtyActiveSessionId || select.value;
+    select.innerHTML = "";
+    const fallback = document.createElement("option");
+    fallback.value = "";
+    fallback.textContent = "select session";
+    select.appendChild(fallback);
+    state.terminalPtySessions.slice(0, 50).forEach((session) => {
+      const option = document.createElement("option");
+      option.value = session.id;
+      option.textContent = `${session.id} • ${session.status} • ${session.cwd}`;
+      select.appendChild(option);
+    });
+    if (current && state.terminalPtySessions.some((session) => session.id === current)) {
+      select.value = current;
+      state.terminalPtyActiveSessionId = current;
+    } else if (state.terminalPtySessions[0]) {
+      select.value = state.terminalPtySessions[0].id;
+      state.terminalPtyActiveSessionId = state.terminalPtySessions[0].id;
+    } else {
+      select.value = "";
+      state.terminalPtyActiveSessionId = "";
+    }
+  }
+  setText("terminal-pty-output", result);
+  return result;
+};
+
+const readTerminalPtySessionId = () => {
+  const selected = ($("terminal-pty-session-select")?.value || "").trim();
+  if (selected) {
+    return selected;
+  }
+  return String(state.terminalPtyActiveSessionId || "").trim();
+};
+
+const connectTerminalPtyWs = () => {
+  const sessionId = readTerminalPtySessionId();
+  if (!sessionId) {
+    appendTerminalPtyOutput("\n[error] select a terminal session first.\n");
+    return;
+  }
+  if (terminalPtyWs) {
+    try {
+      terminalPtyWs.close();
+    } catch {
+      // ignore
+    }
+    terminalPtyWs = null;
+  }
+  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+  const url = `${scheme}://${window.location.host}/api/terminal/ws?sessionId=${encodeURIComponent(sessionId)}`;
+  const ws = new WebSocket(url);
+  terminalPtyWs = ws;
+  appendTerminalPtyOutput(`\n[connect] ${sessionId}\n`);
+  ws.addEventListener("message", (event) => {
+    const raw = typeof event.data === "string" ? event.data : "";
+    const parsed = parseMaybeJSON(raw);
+    if (!parsed || typeof parsed !== "object") {
+      appendTerminalPtyOutput(raw);
+      return;
+    }
+    const type = parsed.type;
+    const payload = parsed.payload || {};
+    if (type === "terminal_bootstrap") {
+      if (typeof payload.buffer === "string" && payload.buffer) {
+        appendTerminalPtyOutput(payload.buffer);
+      }
+      return;
+    }
+    if (type === "terminal_output") {
+      if (typeof payload.chunk === "string") {
+        appendTerminalPtyOutput(payload.chunk);
+      }
+      return;
+    }
+    if (type === "terminal_exit") {
+      appendTerminalPtyOutput(`\n[exit] ${payload.exitCode}\n`);
+    }
+  });
+  ws.addEventListener("close", () => {
+    appendTerminalPtyOutput("\n[disconnect]\n");
+  });
+  ws.addEventListener("error", () => {
+    appendTerminalPtyOutput("\n[ws_error]\n");
+  });
+};
+
+const disconnectTerminalPtyWs = () => {
+  if (!terminalPtyWs) {
+    return;
+  }
+  try {
+    terminalPtyWs.close();
+  } catch {
+    // ignore
+  }
+  terminalPtyWs = null;
+};
+
+const createTerminalPtySession = async () => {
+  const cwd = ($("terminal-pty-cwd")?.value || "").trim();
+  const result = await apiPost("/api/terminal/sessions", {
+    cwd: cwd || undefined,
+  });
+  if (result?.session?.id) {
+    state.terminalPtyActiveSessionId = result.session.id;
+  }
+  await refreshTerminalPtySessions();
+  appendTerminalPtyOutput(`\n[created] ${result?.session?.id || "unknown"}\n`);
+  return result;
+};
+
+const closeTerminalPtySession = async () => {
+  const sessionId = readTerminalPtySessionId();
+  if (!sessionId) {
+    throw new Error("Select a terminal session first.");
+  }
+  if (state.terminalPtyActiveSessionId === sessionId) {
+    disconnectTerminalPtyWs();
+  }
+  const result = await apiPost(`/api/terminal/sessions/${encodeURIComponent(sessionId)}/close`, {});
+  await refreshTerminalPtySessions();
+  appendTerminalPtyOutput(`\n[closed] ${sessionId}\n`);
+  return result;
+};
+
+const sendTerminalPtyInput = async (withNewline) => {
+  const sessionId = readTerminalPtySessionId();
+  if (!sessionId) {
+    throw new Error("Select a terminal session first.");
+  }
+  const input = $("terminal-pty-input");
+  const raw = String(input?.value || "");
+  if (!raw.trim()) {
+    return null;
+  }
+  const data = withNewline ? `${raw}\n` : raw;
+  const result = await apiPost(`/api/terminal/sessions/${encodeURIComponent(sessionId)}/input`, {
+    data,
+  });
+  if (input) {
+    input.value = "";
+  }
+  return result;
+};
+
 const refreshCodeApprovals = async () => {
   const result = await apiGet("/api/code/approvals");
   state.codeApprovals = Array.isArray(result?.approvals) ? result.approvals : [];
@@ -673,7 +1039,7 @@ const renderCoworkShellBanner = () => {
     "milady cowork gateway",
     `route=${route} tasks=${running}/${queued} approvals=${approvals} watch=${watch}`,
     `codex=${codex} claude_session=${claude} livekit=${livekit}`,
-    "slash: /status /help /new /compact /watch /terminal <command>",
+    "slash: /status /help /new /compact /watch /terminal <command> /edit <path> /git status|diff",
   ].join("\n");
 };
 
@@ -1099,7 +1465,7 @@ const runCoworkSlashCommand = async (rawInput) => {
   if (command === "/help") {
     addCoworkMessage(
       "agent",
-      "Commands: /status, /new, /reset, /compact, /watch, /terminal <command>, /help",
+      "Commands: /status, /new, /reset, /compact, /watch, /terminal <command>, /edit <path>, /git status|diff, /help",
     );
     return true;
   }
@@ -1165,6 +1531,58 @@ const runCoworkSlashCommand = async (rawInput) => {
     const cwd = ($("terminal-cwd")?.value || "").trim();
     const result = await runEmbeddedTerminalCommand(args, cwd);
     addCoworkMessage("agent", `Terminal executed: ${args} (${result?.ok ? "ok" : "failed"})`);
+    return true;
+  }
+
+  if (command === "/edit") {
+    if (!args) {
+      addCoworkMessage("system", "Usage: /edit <path>");
+      return true;
+    }
+    const relPath = normalizeWorkbenchRelPath(args);
+    if ($("workspace-file-path")) {
+      $("workspace-file-path").value = relPath;
+    }
+    if ($("workspace-tree-path")) {
+      $("workspace-tree-path").value = parentWorkbenchRelDir(relPath);
+    }
+    try {
+      await refreshWorkspaceTree();
+    } catch {
+      // ignore tree refresh errors
+    }
+    const result = await loadWorkspaceFile(relPath);
+    addCoworkMessage("agent", `Opened ${relPath} (${result?.ok ? "ok" : "failed"})`);
+    return true;
+  }
+
+  if (command === "/git") {
+    const parts = args.split(" ").map((part) => part.trim()).filter(Boolean);
+    const sub = (parts[0] || "status").toLowerCase();
+    if (sub === "status") {
+      const result = await refreshGitStatus();
+      const branch = result?.branch || "unknown";
+      const changes = result?.changes || {};
+      const stagedCount = Array.isArray(changes.staged) ? changes.staged.length : 0;
+      const unstagedCount = Array.isArray(changes.unstaged) ? changes.unstaged.length : 0;
+      const untrackedCount = Array.isArray(changes.untracked) ? changes.untracked.length : 0;
+      addCoworkMessage("agent", `git status: ${branch} staged=${stagedCount} unstaged=${unstagedCount} untracked=${untrackedCount}`);
+      return true;
+    }
+    if (sub === "diff") {
+      const mode = (parts[1] || "").toLowerCase();
+      const staged = mode === "staged";
+      const pathArg = staged ? parts.slice(2).join(" ") : parts.slice(1).join(" ");
+      if ($("git-diff-path")) {
+        $("git-diff-path").value = pathArg;
+      }
+      const result = await refreshGitDiff(staged, pathArg);
+      const diffText = typeof result?.diff === "string" ? result.diff : "";
+      const snippet = diffText.trim() ? diffText.slice(0, 2200) : "(no diff)";
+      addCoworkMessage("agent", `git diff ${staged ? "--staged" : ""} ${pathArg || ""}\n${snippet}`.trim());
+      return true;
+    }
+    addCoworkMessage("system", "Usage: /git status | /git diff [staged] [path]");
     return true;
   }
 
@@ -3716,6 +4134,225 @@ const bindDashboardEvents = () => {
       setText("quick-output", error instanceof Error ? error.message : String(error));
     }
   });
+
+  $("workspace-tree-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshWorkspaceTree();
+    } catch (error) {
+      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("workspace-tree-up")?.addEventListener("click", async () => {
+    try {
+      const current = $("workspace-tree-path")?.value || "";
+      const next = parentWorkbenchRelDir(current);
+      if ($("workspace-tree-path")) {
+        $("workspace-tree-path").value = next;
+      }
+      await refreshWorkspaceTree();
+    } catch (error) {
+      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("workspace-tree")?.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const relPath = (target.dataset.workspacePath || "").trim();
+    const type = (target.dataset.workspaceType || "").trim();
+    if (!relPath || !type) {
+      return;
+    }
+    if (type === "dir") {
+      if ($("workspace-tree-path")) {
+        $("workspace-tree-path").value = relPath;
+      }
+      try {
+        await refreshWorkspaceTree();
+      } catch (error) {
+        setText("workspace-file-output", error instanceof Error ? error.message : String(error));
+      }
+      return;
+    }
+    if ($("workspace-file-path")) {
+      $("workspace-file-path").value = relPath;
+    }
+    try {
+      await loadWorkspaceFile(relPath);
+    } catch (error) {
+      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("workspace-file-load")?.addEventListener("click", async () => {
+    try {
+      await loadWorkspaceFile();
+    } catch (error) {
+      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("workspace-file-dryrun")?.addEventListener("click", async () => {
+    try {
+      await dryRunWorkspaceSave();
+    } catch (error) {
+      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("workspace-file-save")?.addEventListener("click", async () => {
+    try {
+      await executeWorkspaceSave();
+    } catch (error) {
+      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("git-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshGitStatus();
+    } catch (error) {
+      setText("git-status-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("git-log")?.addEventListener("click", async () => {
+    try {
+      await refreshGitLog();
+    } catch (error) {
+      setText("git-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("git-diff-unstaged")?.addEventListener("click", async () => {
+    try {
+      await refreshGitDiff(false);
+    } catch (error) {
+      setText("git-diff-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("git-diff-staged")?.addEventListener("click", async () => {
+    try {
+      await refreshGitDiff(true);
+    } catch (error) {
+      setText("git-diff-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("git-branch-dryrun")?.addEventListener("click", async () => {
+    try {
+      await dryRunGitAction("create_branch");
+    } catch (error) {
+      setText("git-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("git-branch-exec")?.addEventListener("click", async () => {
+    try {
+      await executeGitAction("create_branch");
+    } catch (error) {
+      setText("git-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("git-commit-dryrun")?.addEventListener("click", async () => {
+    try {
+      await dryRunGitAction("commit");
+    } catch (error) {
+      setText("git-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("git-commit-exec")?.addEventListener("click", async () => {
+    try {
+      await executeGitAction("commit");
+    } catch (error) {
+      setText("git-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("git-push-dryrun")?.addEventListener("click", async () => {
+    try {
+      await dryRunGitAction("push");
+    } catch (error) {
+      setText("git-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("git-push-exec")?.addEventListener("click", async () => {
+    try {
+      await executeGitAction("push");
+    } catch (error) {
+      setText("git-action-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("terminal-pty-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshTerminalPtySessions();
+    } catch (error) {
+      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("terminal-pty-create")?.addEventListener("click", async () => {
+    try {
+      await createTerminalPtySession();
+    } catch (error) {
+      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("terminal-pty-close")?.addEventListener("click", async () => {
+    try {
+      await closeTerminalPtySession();
+    } catch (error) {
+      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("terminal-pty-connect")?.addEventListener("click", () => {
+    connectTerminalPtyWs();
+  });
+
+  $("terminal-pty-disconnect")?.addEventListener("click", () => {
+    disconnectTerminalPtyWs();
+  });
+
+  $("terminal-pty-send")?.addEventListener("click", async () => {
+    try {
+      await sendTerminalPtyInput(false);
+    } catch (error) {
+      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("terminal-pty-sendline")?.addEventListener("click", async () => {
+    try {
+      await sendTerminalPtyInput(true);
+    } catch (error) {
+      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("terminal-pty-input")?.addEventListener("keydown", async (event) => {
+    if (!(event instanceof KeyboardEvent)) {
+      return;
+    }
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    try {
+      await sendTerminalPtyInput(true);
+    } catch (error) {
+      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
+    }
+  });
 };
 
 const boot = async () => {
@@ -3749,6 +4386,16 @@ const boot = async () => {
   await refreshIntegrationSubscribers();
   await refreshIntegrationBridgeStatus();
   await refreshTaskLogTail();
+  try {
+    await refreshWorkspaceTree();
+  } catch {
+    // ignore workbench init errors
+  }
+  try {
+    await refreshGitStatus();
+  } catch {
+    // ignore workbench init errors
+  }
   renderWatchObserverMeta();
   const initialWatchSession = resolveActiveWatchSession();
   if (initialWatchSession) {

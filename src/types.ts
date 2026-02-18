@@ -40,6 +40,9 @@ export type IntegrationStepId =
 export type IntegrationStepStatus = "planned" | "skipped" | "executed" | "failed" | "approval_required";
 export type TerminalSessionMode = "command" | "pty";
 export type MigrationVersion = string;
+export type GuardedActionMode = "dry_run" | "execute";
+export type GitActionId = "create_branch" | "commit" | "push";
+export type InteractiveTerminalSessionStatus = "running" | "exited";
 
 export type XArgValue =
   | string
@@ -370,6 +373,122 @@ export interface IntegrationBridgeStatus {
     publisherReady: boolean;
     lastPublishError?: string;
   };
+}
+
+export interface WorkspaceEntry {
+  name: string;
+  relPath: string;
+  type: "file" | "dir";
+  sizeBytes?: number;
+  mtime?: string;
+}
+
+export interface WorkspaceTreeResponse {
+  ok: boolean;
+  path: string;
+  entries: WorkspaceEntry[];
+}
+
+export interface WorkspaceFileReadResponse {
+  ok: boolean;
+  path: string;
+  content: string;
+  sha256: string;
+  sizeBytes: number;
+  mtime: string;
+}
+
+export interface WorkspaceFileWriteRequest {
+  mode: GuardedActionMode;
+  path: string;
+  content: string;
+  baseSha256: string;
+  confirmToken?: string;
+}
+
+export interface WorkspaceFileWriteResponse {
+  ok: boolean;
+  code?: string;
+  error?: string;
+  confirmToken?: string;
+  planned?: {
+    path: string;
+    baseSha256: string;
+    nextSha256: string;
+  };
+  result?: {
+    path: string;
+    sha256: string;
+    wroteBytes: number;
+  };
+}
+
+export interface GitStatusResponse {
+  ok: boolean;
+  branch: string;
+  upstream?: string;
+  ahead: number;
+  behind: number;
+  changes: {
+    staged: string[];
+    unstaged: string[];
+    untracked: string[];
+  };
+  rawPorcelain: string;
+}
+
+export interface GitDiffResponse {
+  ok: boolean;
+  diff: string;
+  truncated: boolean;
+}
+
+export interface GitLogResponse {
+  ok: boolean;
+  commits: Array<{
+    sha: string;
+    subject: string;
+  }>;
+}
+
+export interface GitActionTraceRow {
+  cmd: string;
+  status: number;
+  stdoutTail: string;
+  stderrTail: string;
+}
+
+export interface GitActionRequest {
+  mode: GuardedActionMode;
+  action: GitActionId;
+  params?: Record<string, JsonValue>;
+  confirmToken?: string;
+}
+
+export interface GitActionResponse {
+  ok: boolean;
+  code?: string;
+  error?: string;
+  confirmToken?: string;
+  plannedCommands?: string[];
+  trace?: GitActionTraceRow[];
+}
+
+export interface InteractiveTerminalSessionSummary {
+  id: string;
+  cwd: string;
+  status: InteractiveTerminalSessionStatus;
+  createdAt: string;
+  exitCode?: number;
+  cols?: number;
+  rows?: number;
+}
+
+export interface TerminalWsEvent {
+  type: "terminal_bootstrap" | "terminal_output" | "terminal_exit";
+  ts: string;
+  sessionId: string;
+  payload: Record<string, unknown>;
 }
 
 export interface TerminalSessionRecord {

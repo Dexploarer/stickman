@@ -696,6 +696,96 @@
                   </form>
                   <pre id="terminal-output"></pre>
                 </div>
+
+                <div class="sub-panel">
+                  <h3>Workspace Editor</h3>
+                  <p class="summary">Browse, open, and guarded-save text files inside this workspace.</p>
+                  <label>Directory</label>
+                  <input id="workspace-tree-path" type="text" placeholder="src" value="src" />
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="workspace-tree-refresh">List Files</button>
+                    <button class="ghost" type="button" id="workspace-tree-up">Up</button>
+                  </div>
+                  <div id="workspace-tree" class="workspace-tree"></div>
+                  <label>File path</label>
+                  <input id="workspace-file-path" type="text" placeholder="src/server.ts" />
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="workspace-file-load">Load</button>
+                    <button class="ghost" type="button" id="workspace-file-dryrun">Dry-run Save</button>
+                    <button class="ghost" type="button" id="workspace-file-save">Execute Save</button>
+                  </div>
+                  <textarea id="workspace-file-content" rows="14" placeholder="file contents..."></textarea>
+                  <pre id="workspace-file-output"></pre>
+                </div>
+
+                <div class="sub-panel">
+                  <h3>Git Control Plane</h3>
+                  <p class="summary">Inspect status/diff/log and run guarded branch/commit/push flows.</p>
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="git-refresh">Refresh Git Status</button>
+                    <button class="ghost" type="button" id="git-log">Load Log</button>
+                  </div>
+                  <pre id="git-status-output"></pre>
+                  <label>Diff path filter (optional)</label>
+                  <input id="git-diff-path" type="text" placeholder="src/server.ts" />
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="git-diff-unstaged">Show Unstaged Diff</button>
+                    <button class="ghost" type="button" id="git-diff-staged">Show Staged Diff</button>
+                  </div>
+                  <pre id="git-diff-output"></pre>
+
+                  <h4>Guarded Actions (dry-run then execute)</h4>
+                  <label>New branch name</label>
+                  <input id="git-branch-name" type="text" placeholder="codex/dev-workbench-v1" />
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="git-branch-dryrun">Dry-run Branch</button>
+                    <button class="ghost" type="button" id="git-branch-exec">Execute Branch</button>
+                  </div>
+                  <label>Commit message</label>
+                  <input id="git-commit-message" type="text" placeholder="feat: add workbench controls" />
+                  <div class="toggle-row">
+                    <label><input id="git-commit-addall" type="checkbox" checked /> add -A</label>
+                  </div>
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="git-commit-dryrun">Dry-run Commit</button>
+                    <button class="ghost" type="button" id="git-commit-exec">Execute Commit</button>
+                  </div>
+                  <div class="toggle-row">
+                    <label><input id="git-push-upstream" type="checkbox" checked /> push -u origin</label>
+                  </div>
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="git-push-dryrun">Dry-run Push</button>
+                    <button class="ghost" type="button" id="git-push-exec">Execute Push</button>
+                  </div>
+                  <pre id="git-action-output"></pre>
+                </div>
+
+                <div class="sub-panel terminal-pty-panel">
+                  <h3>Interactive Terminal</h3>
+                  <p class="summary">Feature-flagged. Enable by setting TERMINAL_PTY_ENABLED=true. Runs with local user permissions.</p>
+                  <label>Working directory (optional)</label>
+                  <input id="terminal-pty-cwd" type="text" placeholder="." />
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="terminal-pty-create">Create Session</button>
+                    <button class="ghost" type="button" id="terminal-pty-refresh">Refresh Sessions</button>
+                    <button class="ghost" type="button" id="terminal-pty-close">Close Session</button>
+                  </div>
+                  <label>Session</label>
+                  <select id="terminal-pty-session-select">
+                    <option value="">select session</option>
+                  </select>
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="terminal-pty-connect">Connect Stream</button>
+                    <button class="ghost" type="button" id="terminal-pty-disconnect">Disconnect</button>
+                  </div>
+                  <label>Input</label>
+                  <input id="terminal-pty-input" type="text" placeholder="echo hello" />
+                  <div class="button-row">
+                    <button class="ghost" type="button" id="terminal-pty-send">Send</button>
+                    <button class="ghost" type="button" id="terminal-pty-sendline">Send Line</button>
+                  </div>
+                  <pre id="terminal-pty-output"></pre>
+                </div>
               </section>
               <section class="cowork-lane">
                 <h3>Live Agent Observer</h3>

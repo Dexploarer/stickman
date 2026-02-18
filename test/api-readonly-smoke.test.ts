@@ -157,6 +157,11 @@ describe("api read-only smoke", () => {
     const codeStatus = await apiGet("/api/code/status");
     const codeSessions = await apiGet("/api/code/sessions");
     const terminalPtySessions = await apiGet("/api/terminal/sessions");
+    const workspaceTree = await apiGet("/api/workspace/tree?path=src");
+    const workspaceFile = await apiGet("/api/workspace/file?path=src%2Fconfig.ts");
+    const gitStatus = await apiGet("/api/git/status");
+    const gitLog = await apiGet("/api/git/log?limit=5");
+    const gitDiff = await apiGet("/api/git/diff?staged=0");
     const wsUpgrade = await apiGet("/api/live/ws");
 
     expect(tasks.status).toBe(200);
@@ -170,6 +175,11 @@ describe("api read-only smoke", () => {
     expect(codeStatus.status).toBe(200);
     expect(codeSessions.status).toBe(200);
     expect([423, 501]).toContain(terminalPtySessions.status);
+    expect(workspaceTree.status).toBe(200);
+    expect(workspaceFile.status).toBe(200);
+    expect(gitStatus.status).toBe(200);
+    expect(gitLog.status).toBe(200);
+    expect(gitDiff.status).toBe(200);
     expect(wsUpgrade.status).toBe(426);
 
     expect((tasks.body as Record<string, unknown>).ok).toBe(true);
@@ -183,6 +193,15 @@ describe("api read-only smoke", () => {
     expect((codeStatus.body as Record<string, unknown>).ok).toBe(true);
     expect(Array.isArray((codeSessions.body as Record<string, unknown>).sessions)).toBe(true);
     expect((terminalPtySessions.body as Record<string, unknown>).ok).toBe(false);
+    expect((workspaceTree.body as Record<string, unknown>).ok).toBe(true);
+    expect(Array.isArray((workspaceTree.body as Record<string, unknown>).entries)).toBe(true);
+    expect((workspaceFile.body as Record<string, unknown>).ok).toBe(true);
+    expect(typeof (workspaceFile.body as Record<string, unknown>).content).toBe("string");
+    expect((gitStatus.body as Record<string, unknown>).ok).toBe(true);
+    expect(typeof (gitStatus.body as Record<string, unknown>).branch).toBe("string");
+    expect(Array.isArray((gitLog.body as Record<string, unknown>).commits)).toBe(true);
+    expect((gitDiff.body as Record<string, unknown>).ok).toBe(true);
+    expect(typeof (gitDiff.body as Record<string, unknown>).diff).toBe("string");
     expect((wsUpgrade.body as Record<string, unknown>).ok).toBe(false);
   });
 });

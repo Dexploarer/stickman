@@ -62,6 +62,19 @@ import type {
 } from "./types.js";
 import { xEndpointCatalog } from "./x/catalog.js";
 import { runXEndpoint } from "./x/runner.js";
+import { runGit, tailText } from "./git/runner.js";
+import { getGitStatus } from "./git/status.js";
+import { normalizeCommitMessage, validateBranchName } from "./git/validate.js";
+import { listWorkspaceTree, readWorkspaceTextFile, sha256Hex, writeWorkspaceTextFile } from "./workspace/files.js";
+import {
+  addTerminalSessionListener,
+  closeTerminalSession,
+  createTerminalSession,
+  getTerminalSession,
+  listTerminalSessions,
+  resizeTerminalSession,
+  sendTerminalSessionInput,
+} from "./terminal/sessions.js";
 
 const app = express();
 
@@ -4802,6 +4815,322 @@ app.post("/api/watch/frame", (req, res) => {
   });
 });
 
+app.get("/api/workspace/tree", async (req, res) => {
+  const relDir = typeof req.query?.path === "string" ? req.query.path.trim() : "";
+  const result = await listWorkspaceTree({ workspaceRoot: projectRoot, relDir });
+  if (!result.ok) {
+    const status =
+      result.code === "blocked_path"
+        ? 403
+        : result.code === "not_found"
+          ? 404
+          : result.code === "too_many_entries"
+            ? 413
+            : 400;
+    res.status(status).json({ ok: false, code: result.code, error: result.error });
+    return;
+  }
+  res.json({
+    ok: true,
+    path: result.path,
+    entries: result.entries,
+  });
+});
+
+app.get("/api/workspace/file", async (req, res) => {
+  const relPath = typeof req.query?.path === "string" ? req.query.path.trim() : "";
+  const result = await readWorkspaceTextFile({ workspaceRoot: projectRoot, relPath });
+  if (!result.ok) {
+    const status =
+      result.code === "blocked_path"
+        ? 403
+        : result.code === "not_found"
+          ? 404
+          : result.code === "too_large"
+            ? 413
+            : result.code === "binary_file"
+              ? 415
+              : 400;
+    res.status(status).json({ ok: false, code: result.code, error: result.error });
+    return;
+  }
+  res.json({
+    ok: true,
+    path: result.path,
+    content: result.content,
+    sha256: result.sha256,
+    sizeBytes: result.sizeBytes,
+    mtime: result.mtime,
+  });
+});
+
+app.post("/api/workspace/file", async (req, res) => {
+  const mode = req.body?.mode === "execute" ? ("execute" as const) : req.body?.mode === "dry_run" ? ("dry_run" as const) : null;
+  const relPath = typeof req.body?.path === "string" ? req.body.path.trim() : "";
+  const content = typeof req.body?.content === "string" ? req.body.content : "";
+  const baseSha256 = typeof req.body?.baseSha256 === "string" ? req.body.baseSha256.trim() : "";
+  if (!mode) {
+    res.status(400).json({ ok: false, error: "mode must be dry_run or execute." });
+    return;
+  }
+  if (!relPath) {
+    res.status(400).json({ ok: false, error: "path is required." });
+    return;
+  }
+  const byteLength = Buffer.byteLength(content, "utf-8");
+  if (byteLength > 512_000) {
+    res.status(413).json({ ok: false, code: "too_large", error: "content exceeds max size (512000 bytes)." });
+    return;
+  }
+
+  const existing = await readWorkspaceTextFile({ workspaceRoot: projectRoot, relPath });
+  if (!existing.ok && existing.code !== "not_found") {
+    const status =
+      existing.code === "blocked_path"
+        ? 403
+        : existing.code === "too_large"
+          ? 413
+          : existing.code === "binary_file"
+            ? 415
+            : 400;
+    res.status(status).json({ ok: false, code: existing.code, error: existing.error });
+    return;
+  }
+  const currentSha = existing.ok ? existing.sha256 : "";
+  if (currentSha && currentSha !== baseSha256) {
+    res.status(409).json({
+      ok: false,
+      code: "base_sha_mismatch",
+      error: "baseSha256 does not match current file contents.",
+      currentSha256: currentSha,
+    });
+    return;
+  }
+  if (!currentSha && baseSha256) {
+    res.status(409).json({
+      ok: false,
+      code: "base_sha_mismatch",
+      error: "baseSha256 does not match current file contents.",
+      currentSha256: currentSha,
+    });
+    return;
+  }
+
+  const nextSha256 = sha256Hex(content);
+  const payloadHash = buildConfirmPayloadHash({
+    kind: "workspace_file_write",
+    path: relPath,
+    baseSha256,
+    nextSha256,
+  });
+
+  if (mode === "dry_run") {
+    const token = issueConfirmToken(payloadHash);
+    res.json({
+      ok: true,
+      confirmToken: token.token,
+      planned: {
+        path: relPath,
+        baseSha256,
+        nextSha256,
+      },
+    });
+    return;
+  }
+
+  const tokenCheck = consumeConfirmToken(String(req.body?.confirmToken || ""), payloadHash);
+  if (!tokenCheck.ok) {
+    res.status(409).json({ ok: false, code: tokenCheck.code, error: "confirm token required before executing." });
+    return;
+  }
+
+  const writeResult = await writeWorkspaceTextFile({ workspaceRoot: projectRoot, relPath, content, baseSha256 });
+  if (!writeResult.ok) {
+    const status =
+      writeResult.code === "blocked_path"
+        ? 403
+        : writeResult.code === "too_large"
+          ? 413
+          : writeResult.code === "binary_file"
+            ? 415
+            : writeResult.code === "base_sha_mismatch"
+              ? 409
+              : 400;
+    res.status(status).json({
+      ok: false,
+      code: writeResult.code,
+      error: writeResult.error,
+      currentSha256: writeResult.currentSha256,
+    });
+    return;
+  }
+  res.json({
+    ok: true,
+    result: {
+      path: writeResult.path,
+      sha256: writeResult.sha256,
+      wroteBytes: writeResult.wroteBytes,
+    },
+  });
+});
+
+app.get("/api/git/status", (_req, res) => {
+  const status = getGitStatus(projectRoot);
+  if (!status.ok) {
+    res.status(400).json({ ok: false, error: "git status failed.", raw: status.rawPorcelain });
+    return;
+  }
+  res.json(status);
+});
+
+app.get("/api/git/diff", (req, res) => {
+  const staged = typeof req.query?.staged === "string" ? req.query.staged.trim() : "";
+  const stagedFlag = staged === "1" || staged.toLowerCase() === "true";
+  const relPath = typeof req.query?.path === "string" ? req.query.path.trim() : "";
+  if (relPath && (path.isAbsolute(relPath) || relPath.includes("..") || relPath.includes("\0") || relPath.startsWith("-"))) {
+    res.status(400).json({ ok: false, error: "invalid path filter." });
+    return;
+  }
+  const args = stagedFlag ? ["diff", "--cached"] : ["diff"];
+  if (relPath) {
+    args.push("--", relPath);
+  }
+  const result = runGit(args, { cwd: projectRoot, timeoutMs: 25_000 });
+  if (!result.ok) {
+    res.status(400).json({ ok: false, error: result.stderr || "git diff failed." });
+    return;
+  }
+  const truncated = result.stdout.length > 200_000;
+  res.json({
+    ok: true,
+    truncated,
+    diff: truncated ? result.stdout.slice(0, 200_000) : result.stdout,
+  });
+});
+
+app.get("/api/git/log", (req, res) => {
+  const limitRaw = typeof req.query?.limit === "string" ? req.query.limit.trim() : "";
+  const parsedLimit = Number(limitRaw);
+  const limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(200, Math.floor(parsedLimit))) : 50;
+  const result = runGit(["log", "--oneline", "-n", String(limit)], { cwd: projectRoot, timeoutMs: 25_000 });
+  if (!result.ok) {
+    res.status(400).json({ ok: false, error: result.stderr || "git log failed." });
+    return;
+  }
+  const commits = String(result.stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [sha, ...rest] = line.split(" ");
+      return { sha, subject: rest.join(" ").trim() };
+    })
+    .filter((row) => row.sha);
+  res.json({ ok: true, commits });
+});
+
+app.post("/api/git/actions", (req, res) => {
+  const mode = req.body?.mode === "execute" ? ("execute" as const) : req.body?.mode === "dry_run" ? ("dry_run" as const) : null;
+  const action = typeof req.body?.action === "string" ? req.body.action.trim() : "";
+  const params = req.body?.params && typeof req.body.params === "object" && !Array.isArray(req.body.params) ? (req.body.params as Record<string, unknown>) : {};
+  if (!mode) {
+    res.status(400).json({ ok: false, error: "mode must be dry_run or execute." });
+    return;
+  }
+  if (!action) {
+    res.status(400).json({ ok: false, error: "action is required." });
+    return;
+  }
+
+  const planned: string[][] = [];
+  const plannedText: string[] = [];
+  const planError = (error: string) => {
+    res.status(400).json({ ok: false, error });
+  };
+
+  if (action === "create_branch") {
+    const nameRaw = typeof params.name === "string" ? params.name : "";
+    const checkout = params.checkout !== false;
+    const validated = validateBranchName(nameRaw);
+    if (!validated.ok) {
+      planError(validated.error);
+      return;
+    }
+    planned.push(checkout ? ["checkout", "-b", validated.name] : ["branch", validated.name]);
+  } else if (action === "commit") {
+    const messageRaw = typeof params.message === "string" ? params.message : "";
+    const addAll = params.addAll !== false;
+    const validated = normalizeCommitMessage(messageRaw);
+    if (!validated.ok) {
+      planError(validated.error);
+      return;
+    }
+    if (addAll) {
+      planned.push(["add", "-A"]);
+    }
+    planned.push(["commit", "-m", validated.message]);
+  } else if (action === "push") {
+    const remote = typeof params.remote === "string" ? params.remote : "origin";
+    const setUpstream = params.setUpstream !== false;
+    if (remote !== "origin") {
+      planError("remote must be origin.");
+      return;
+    }
+    const status = getGitStatus(projectRoot);
+    if (!status.ok || !status.branch || status.branch === "(detached)") {
+      planError("cannot push: git branch is not available (detached head?).");
+      return;
+    }
+    planned.push(["push", ...(setUpstream ? ["-u"] : []), "origin", status.branch]);
+  } else {
+    planError("unknown git action.");
+    return;
+  }
+
+  for (const args of planned) {
+    plannedText.push(`git ${args.map((part) => (part.includes(" ") ? JSON.stringify(part) : part)).join(" ")}`);
+  }
+
+  const payloadHash = buildConfirmPayloadHash({
+    kind: "git_action",
+    action,
+    params,
+    plannedCommands: plannedText,
+  });
+
+  if (mode === "dry_run") {
+    const token = issueConfirmToken(payloadHash);
+    res.json({
+      ok: true,
+      confirmToken: token.token,
+      plannedCommands: plannedText,
+    });
+    return;
+  }
+
+  const tokenCheck = consumeConfirmToken(String(req.body?.confirmToken || ""), payloadHash);
+  if (!tokenCheck.ok) {
+    res.status(409).json({ ok: false, code: tokenCheck.code, error: "confirm token required before executing." });
+    return;
+  }
+
+  const trace = planned.map((args) => {
+    const result = runGit(args, { cwd: projectRoot, timeoutMs: 120_000 });
+    return {
+      cmd: `git ${args.join(" ")}`,
+      status: result.status,
+      stdoutTail: tailText(result.stdout, 2000),
+      stderrTail: tailText(result.stderr, 2000),
+    };
+  });
+  const failure = trace.find((row) => row.status !== 0);
+  if (failure) {
+    res.status(400).json({ ok: false, error: "git action failed.", trace });
+    return;
+  }
+  res.json({ ok: true, trace });
+});
+
 app.get("/api/live/ws", (_req, res) => {
   res.status(426).json({
     ok: false,
@@ -4862,20 +5191,26 @@ const respondTerminalPtyDisabled = (res: Response) => {
   });
 };
 
-const respondTerminalPtyUnimplemented = (res: Response) => {
-  res.status(501).json({
-    ok: false,
-    code: "terminal_pty_unimplemented",
-    error: "PTY terminal mode is not implemented in this build yet.",
-  });
-};
-
-app.post("/api/terminal/sessions", (_req, res) => {
+app.post("/api/terminal/sessions", (req, res) => {
   if (!appConfig.terminal.ptyEnabled) {
     respondTerminalPtyDisabled(res);
     return;
   }
-  respondTerminalPtyUnimplemented(res);
+  const cwd = typeof req.body?.cwd === "string" ? req.body.cwd.trim() : undefined;
+  const colsRaw = typeof req.body?.cols === "number" ? req.body.cols : undefined;
+  const rowsRaw = typeof req.body?.rows === "number" ? req.body.rows : undefined;
+  const cols = typeof colsRaw === "number" && Number.isFinite(colsRaw) ? colsRaw : undefined;
+  const rows = typeof rowsRaw === "number" && Number.isFinite(rowsRaw) ? rowsRaw : undefined;
+  try {
+    const result = createTerminalSession({ projectRoot, cwd, cols, rows });
+    if (!result.ok) {
+      res.status(400).json({ ok: false, error: result.error });
+      return;
+    }
+    res.status(201).json({ ok: true, session: result.session });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 app.get("/api/terminal/sessions", (_req, res) => {
@@ -4883,31 +5218,70 @@ app.get("/api/terminal/sessions", (_req, res) => {
     respondTerminalPtyDisabled(res);
     return;
   }
-  respondTerminalPtyUnimplemented(res);
+  res.json({ ok: true, sessions: listTerminalSessions(40) });
 });
 
-app.post("/api/terminal/sessions/:id/input", (_req, res) => {
+app.post("/api/terminal/sessions/:id/input", (req, res) => {
   if (!appConfig.terminal.ptyEnabled) {
     respondTerminalPtyDisabled(res);
     return;
   }
-  respondTerminalPtyUnimplemented(res);
+  const id = String(req.params.id || "").trim();
+  const data = typeof req.body?.data === "string" ? req.body.data : "";
+  if (!id) {
+    res.status(400).json({ ok: false, error: "session id is required." });
+    return;
+  }
+  if (data.length > 64_000) {
+    res.status(413).json({ ok: false, error: "input too large." });
+    return;
+  }
+  const result = sendTerminalSessionInput(id, data);
+  if (!result.ok) {
+    res.status(404).json({ ok: false, error: result.error });
+    return;
+  }
+  res.json({ ok: true });
 });
 
-app.post("/api/terminal/sessions/:id/resize", (_req, res) => {
+app.post("/api/terminal/sessions/:id/resize", (req, res) => {
   if (!appConfig.terminal.ptyEnabled) {
     respondTerminalPtyDisabled(res);
     return;
   }
-  respondTerminalPtyUnimplemented(res);
+  const id = String(req.params.id || "").trim();
+  const colsRaw = typeof req.body?.cols === "number" ? req.body.cols : undefined;
+  const rowsRaw = typeof req.body?.rows === "number" ? req.body.rows : undefined;
+  const cols = typeof colsRaw === "number" && Number.isFinite(colsRaw) ? colsRaw : undefined;
+  const rows = typeof rowsRaw === "number" && Number.isFinite(rowsRaw) ? rowsRaw : undefined;
+  if (!id) {
+    res.status(400).json({ ok: false, error: "session id is required." });
+    return;
+  }
+  const result = resizeTerminalSession(id, cols, rows);
+  if (!result.ok) {
+    res.status(404).json({ ok: false, error: result.error });
+    return;
+  }
+  res.json({ ok: true });
 });
 
-app.post("/api/terminal/sessions/:id/close", (_req, res) => {
+app.post("/api/terminal/sessions/:id/close", (req, res) => {
   if (!appConfig.terminal.ptyEnabled) {
     respondTerminalPtyDisabled(res);
     return;
   }
-  respondTerminalPtyUnimplemented(res);
+  const id = String(req.params.id || "").trim();
+  if (!id) {
+    res.status(400).json({ ok: false, error: "session id is required." });
+    return;
+  }
+  const result = closeTerminalSession(id);
+  if (!result.ok) {
+    res.status(404).json({ ok: false, error: result.error });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 app.get("/api/terminal/ws", (_req, res) => {
@@ -5868,6 +6242,8 @@ const startHeartbeatScheduler = () => {
   void runHeartbeatCycle("startup");
 };
 
+const terminalWsClients = new Map<Socket, { sessionId: string; unsubscribe: () => void }>();
+
 const handleWebSocketUpgrade = (request: { url?: string; headers: Record<string, string | string[] | undefined> }, socket: Socket) => {
   const requestUrl = request.url || "";
   let parsedUrl: URL;
@@ -5877,9 +6253,23 @@ const handleWebSocketUpgrade = (request: { url?: string; headers: Record<string,
     socket.destroy();
     return;
   }
-  if (!parsedUrl.pathname.startsWith("/api/live/ws")) {
+  const pathname = parsedUrl.pathname || "";
+  const isLiveWs = pathname.startsWith("/api/live/ws");
+  const isTerminalWs = pathname.startsWith("/api/terminal/ws");
+  if (!isLiveWs && !isTerminalWs) {
     socket.destroy();
     return;
+  }
+  if (isTerminalWs) {
+    if (!appConfig.terminal.ptyEnabled) {
+      socket.destroy();
+      return;
+    }
+    const sessionId = String(parsedUrl.searchParams.get("sessionId") || "").trim();
+    if (!sessionId || !getTerminalSession(sessionId)) {
+      socket.destroy();
+      return;
+    }
   }
   const keyHeader = request.headers["sec-websocket-key"];
   const key = Array.isArray(keyHeader) ? keyHeader[0] : keyHeader;
@@ -5898,24 +6288,75 @@ const handleWebSocketUpgrade = (request: { url?: string; headers: Record<string,
     "\r\n",
   ];
   socket.write(headers.join("\r\n"));
-  const filter = parseLiveEventFilter({
-    watchSessionId: parsedUrl.searchParams.get("sessionId"),
-    sourceId: parsedUrl.searchParams.get("sourceId"),
-    taskId: parsedUrl.searchParams.get("taskId"),
-  });
-  liveWsClients.set(socket, filter);
-  const bootstrap = liveEventHistory.filter((event) => matchesLiveEventFilter(event, filter)).slice(-40);
-  for (const event of bootstrap) {
-    socket.write(encodeWebSocketFrame(JSON.stringify(event)));
+  if (isLiveWs) {
+    const filter = parseLiveEventFilter({
+      watchSessionId: parsedUrl.searchParams.get("sessionId"),
+      sourceId: parsedUrl.searchParams.get("sourceId"),
+      taskId: parsedUrl.searchParams.get("taskId"),
+    });
+    liveWsClients.set(socket, filter);
+    const bootstrap = liveEventHistory.filter((event) => matchesLiveEventFilter(event, filter)).slice(-40);
+    for (const event of bootstrap) {
+      socket.write(encodeWebSocketFrame(JSON.stringify(event)));
+    }
+  } else {
+    const sessionId = String(parsedUrl.searchParams.get("sessionId") || "").trim();
+    const session = getTerminalSession(sessionId);
+    if (!session) {
+      try {
+        socket.end();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    const bootstrapBuffer = tailText(String(session.buffer || ""), 60_000);
+    socket.write(
+      encodeWebSocketFrame(
+        JSON.stringify({
+          type: "terminal_bootstrap",
+          ts: new Date().toISOString(),
+          sessionId,
+          payload: {
+            cwd: session.cwd,
+            status: session.status,
+            buffer: bootstrapBuffer,
+          },
+        }),
+      ),
+    );
+    const listener = (event: { type: string; ts: string; sessionId: string; payload: Record<string, unknown> }) => {
+      if (event.sessionId !== sessionId) {
+        return;
+      }
+      try {
+        socket.write(encodeWebSocketFrame(JSON.stringify(event)));
+      } catch {
+        // ignore
+      }
+    };
+    const subscribed = addTerminalSessionListener(sessionId, listener);
+    if (subscribed.ok) {
+      terminalWsClients.set(socket, { sessionId, unsubscribe: subscribed.unsubscribe });
+    }
   }
   socket.on("close", () => {
     liveWsClients.delete(socket);
+    const terminal = terminalWsClients.get(socket);
+    terminal?.unsubscribe();
+    terminalWsClients.delete(socket);
   });
   socket.on("end", () => {
     liveWsClients.delete(socket);
+    const terminal = terminalWsClients.get(socket);
+    terminal?.unsubscribe();
+    terminalWsClients.delete(socket);
   });
   socket.on("error", () => {
     liveWsClients.delete(socket);
+    const terminal = terminalWsClients.get(socket);
+    terminal?.unsubscribe();
+    terminalWsClients.delete(socket);
   });
   socket.on("data", (buffer: Buffer) => {
     if (!buffer || buffer.length < 2) {
@@ -5929,6 +6370,9 @@ const handleWebSocketUpgrade = (request: { url?: string; headers: Record<string,
         // ignore
       }
       liveWsClients.delete(socket);
+      const terminal = terminalWsClients.get(socket);
+      terminal?.unsubscribe();
+      terminalWsClients.delete(socket);
     }
   });
 };
