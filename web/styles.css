@@ -233,12 +233,36 @@ button {
   color: #fff;
   background: linear-gradient(90deg, var(--accent), var(--accent-soft));
   cursor: pointer;
+  transition:
+    transform 140ms ease,
+    filter 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease;
 }
 
 button.ghost {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(15, 36, 41, 0.18);
+}
+
+button:hover {
+  filter: brightness(0.98);
+  transform: translateY(-0.5px);
+}
+
+button:active {
+  filter: brightness(0.96);
+  transform: translateY(0);
+}
+
+button.ghost:hover {
+  background: rgba(255, 255, 255, 0.88);
+}
+
+:where(button, input, select, textarea):focus-visible {
+  outline: 3px solid rgba(213, 78, 43, 0.35);
+  outline-offset: 2px;
 }
 
 .button-row {
@@ -323,17 +347,29 @@ form {
 .cowork-grid {
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(360px, 1fr) minmax(320px, 420px);
-  gap: 12px;
+  gap: 14px;
+  align-items: start;
 }
 
 .cowork-lane {
   border: 1px solid rgba(15, 36, 41, 0.14);
-  border-radius: 10px;
-  padding: 10px;
-  background: rgba(255, 255, 255, 0.7);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.76);
   min-width: 0;
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  box-shadow: 0 12px 28px rgba(15, 36, 41, 0.08);
+}
+
+.cowork-lane > h3 {
+  margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(15, 36, 41, 0.1);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(15, 36, 41, 0.72);
 }
 
 .cowork-shell-banner {
@@ -347,6 +383,7 @@ form {
   padding: 9px 10px;
   white-space: pre-wrap;
   word-break: break-word;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .cowork-command-bar {
@@ -358,18 +395,21 @@ form {
 .cowork-command-btn {
   font-family: var(--mono);
   font-size: 0.73rem;
-  padding: 5px 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .cowork-chat-log {
   border: 1px solid rgba(15, 36, 41, 0.14);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.78);
-  max-height: 240px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  max-height: clamp(260px, 34vh, 420px);
   overflow-y: auto;
   display: grid;
-  gap: 7px;
-  padding: 8px;
+  gap: 10px;
+  padding: 10px;
+  justify-items: start;
 }
 
 .cowork-metrics {
@@ -482,16 +522,20 @@ form {
 
 .cowork-msg {
   border: 1px solid rgba(15, 36, 41, 0.12);
-  border-radius: 8px;
-  padding: 7px;
+  border-radius: 12px;
+  padding: 9px 10px;
   font-size: 0.8rem;
   line-height: 1.35;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 10px 24px rgba(15, 36, 41, 0.06);
+  max-width: 92%;
+  white-space: pre-wrap;
 }
 
 .cowork-msg.msg-user {
   border-color: rgba(32, 71, 168, 0.24);
   background: rgba(229, 236, 255, 0.9);
+  justify-self: end;
 }
 
 .cowork-msg.msg-agent {

@@ -333,6 +333,25 @@ struct WebContainer: NSViewRepresentable {
   }
 }
 
+private enum SuitePane: String, CaseIterable, Identifiable {
+  case dashboard = "Dashboard"
+  case controlCenter = "Control Center"
+  case logs = "Server Logs"
+
+  var id: String { rawValue }
+
+  var systemImage: String {
+    switch self {
+    case .dashboard:
+      return "rectangle.3.group"
+    case .controlCenter:
+      return "slider.horizontal.3"
+    case .logs:
+      return "terminal"
+    }
+  }
+}
+
 struct ContentView: View {
   @StateObject private var webStore = WebViewStore()
   @StateObject private var serverManager: LocalServerManager
@@ -350,6 +369,7 @@ struct ContentView: View {
   @State private var integrationsStatusText = "Integration status not loaded."
   @State private var integrationActionStatusText = "Integration actions not run."
   @State private var bridgeStatusText = "Bridge status not loaded."
+  @State private var paneSelection: SuitePane = .dashboard
   @State private var badgeCodingReady = false
   @State private var badgeSocialReady = false
   @State private var badgeWatchReady = false
@@ -510,6 +530,51 @@ struct ContentView: View {
       .clipShape(Capsule())
   }
 
+  @ToolbarContentBuilder
+  private var toolbarContent: some ToolbarContent {
+    ToolbarItem(placement: .principal) {
+      Text("Prompt or Die Social Suite")
+        .font(.headline)
+    }
+
+    ToolbarItem(placement: .automatic) {
+      Text("Server: \(serverManager.statusText)")
+        .font(.system(.caption, design: .monospaced))
+        .foregroundStyle(serverManager.isRunning ? .green : .secondary)
+    }
+
+    ToolbarItemGroup(placement: .primaryAction) {
+      Button("Start") {
+        serverManager.projectRoot = projectRootInput
+        UserDefaults.standard.set(projectRootInput, forKey: "PODProjectRoot")
+        serverManager.start()
+      }
+      .disabled(serverManager.isRunning)
+
+      Button("Restart") {
+        serverManager.projectRoot = projectRootInput
+        UserDefaults.standard.set(projectRootInput, forKey: "PODProjectRoot")
+        serverManager.restart()
+      }
+
+      Button("Stop") {
+        serverManager.stop()
+      }
+      .disabled(!serverManager.isRunning)
+    }
+
+    ToolbarItem(placement: .automatic) {
+      HStack(spacing: 6) {
+        badgePill("coding-agent", badgeCodingReady)
+        badgePill("social-agent", badgeSocialReady)
+        badgePill("watch", badgeWatchReady)
+        badgePill("claude", badgeClaudeSession)
+        badgePill("codex", badgeCodexAvailable)
+        badgePill("livekit", badgeLivekitConfigured)
+      }
+    }
+  }
+
   private var activeTab: BrowserTab? {
     browserTabs.first(where: { $0.id == activeBrowserTabId })
   }
@@ -595,394 +660,402 @@ struct ContentView: View {
     }
   }
 
-  var body: some View {
-    VStack(spacing: 10) {
-      HStack(spacing: 10) {
-        Text("Server: \(serverManager.statusText)")
-          .font(.system(.caption, design: .monospaced))
-          .foregroundStyle(serverManager.isRunning ? .green : .secondary)
-        Spacer()
-        Button("Start") {
-          serverManager.projectRoot = projectRootInput
-          UserDefaults.standard.set(projectRootInput, forKey: "PODProjectRoot")
-          serverManager.start()
-        }
-        .disabled(serverManager.isRunning)
-        Button("Restart") {
-          serverManager.projectRoot = projectRootInput
-          UserDefaults.standard.set(projectRootInput, forKey: "PODProjectRoot")
-          serverManager.restart()
-        }
-        Button("Stop") {
-          serverManager.stop()
-        }
-        .disabled(!serverManager.isRunning)
-      }
-
-      HStack(spacing: 8) {
-        badgePill("coding-agent", badgeCodingReady)
-        badgePill("social-agent", badgeSocialReady)
-        badgePill("watch", badgeWatchReady)
-        badgePill("claude-session", badgeClaudeSession)
-        badgePill("codex", badgeCodexAvailable)
-        badgePill("livekit", badgeLivekitConfigured)
-        Spacer()
-      }
-
-      HStack(spacing: 10) {
-        TextField("Project root", text: $projectRootInput)
-          .textFieldStyle(.roundedBorder)
-        Button("Apply Path") {
-          serverManager.projectRoot = projectRootInput
-          UserDefaults.standard.set(projectRootInput, forKey: "PODProjectRoot")
-        }
-      }
-
-      HStack(spacing: 10) {
-        TextField("Dashboard URL", text: $inputURL)
-          .textFieldStyle(.roundedBorder)
-        Button("Open Dashboard") {
-          if let parsed = URL(string: inputURL) {
-            webStore.targetURL = parsed
-            if let index = browserTabs.firstIndex(where: { $0.id == activeBrowserTabId }) {
-              browserTabs[index].url = parsed.absoluteString
-              browserTabs[index].title = parsed.host ?? parsed.absoluteString
+  private var dashboardPane: some View {
+    VStack(spacing: 12) {
+      GroupBox("Dashboard") {
+        VStack(spacing: 10) {
+          HStack(spacing: 10) {
+            TextField("Dashboard URL", text: $inputURL)
+              .textFieldStyle(.roundedBorder)
+            Button("Open Dashboard") {
+              if let parsed = URL(string: inputURL) {
+                webStore.targetURL = parsed
+                if let index = browserTabs.firstIndex(where: { $0.id == activeBrowserTabId }) {
+                  browserTabs[index].url = parsed.absoluteString
+                  browserTabs[index].title = parsed.host ?? parsed.absoluteString
+                }
+              }
+            }
+            Button("Open in Chrome") {
+              if let parsed = URL(string: inputURL) {
+                Task {
+                  macStatusText = await performRequest(
+                    path: "/api/mac/apps/open",
+                    method: "POST",
+                    body: [
+                      "appId": "chrome",
+                      "url": parsed.absoluteString,
+                    ]
+                  )
+                }
+              }
             }
           }
-        }
-        Button("New Tab") {
-          addBrowserTab(url: newTabURL)
-        }
-        Button("Open in Chrome") {
-          if let parsed = URL(string: inputURL) {
-            Task {
-              macStatusText = await performRequest(
-                path: "/api/mac/apps/open",
-                method: "POST",
-                body: [
-                  "appId": "chrome",
-                  "url": parsed.absoluteString,
-                ]
-              )
+
+          HStack(spacing: 10) {
+            TextField("New tab URL", text: $newTabURL)
+              .textFieldStyle(.roundedBorder)
+            Button("Add Tab") {
+              addBrowserTab(url: newTabURL)
+            }
+            Button("Reload Active") {
+              reloadActiveTab()
+            }
+            Button("Pin/Unpin Mission") {
+              togglePinActiveTab()
+            }
+            Button("Send Tab to Agent") {
+              sendActiveTabToAgent()
+            }
+            Button("Close Active") {
+              closeActiveTab()
             }
           }
-        }
-      }
 
-      HStack(spacing: 10) {
-        TextField("New tab URL", text: $newTabURL)
-          .textFieldStyle(.roundedBorder)
-        Button("Reload Active") {
-          reloadActiveTab()
-        }
-        Button("Pin/Unpin Mission") {
-          togglePinActiveTab()
-        }
-        Button("Send Tab to Agent") {
-          sendActiveTabToAgent()
-        }
-        Button("Close Active") {
-          closeActiveTab()
-        }
-      }
-
-      ScrollView(.horizontal) {
-        HStack(spacing: 8) {
-          ForEach(browserTabs) { tab in
-            Button(tab.pinnedToMission ? "[Pinned] \(tab.title)" : tab.title) {
-              activeBrowserTabId = tab.id
-              openTab(tab)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(tab.id == activeBrowserTabId ? .blue : .gray)
-          }
-        }
-      }
-
-      HStack(alignment: .top, spacing: 10) {
-        GroupBox("Integrations") {
-          VStack(alignment: .leading, spacing: 6) {
+          ScrollView(.horizontal) {
             HStack(spacing: 8) {
-              Button("Refresh Integrations") {
-                refreshIntegrationStatus()
-              }
-              Button("Prepare Workspace") {
-                runIntegrationRunbook("prepare_observer_workspace")
-              }
-              Button("Launch Watch") {
-                runIntegrationRunbook("launch_watch_surface")
-              }
-              Button("Repair Provider") {
-                runIntegrationRunbook("repair_provider_route")
-              }
-              Button("Recover LiveKit") {
-                runIntegrationRunbook("recover_livekit_bridge")
+              ForEach(browserTabs) { tab in
+                Button(tab.pinnedToMission ? "[Pinned] \(tab.title)" : tab.title) {
+                  activeBrowserTabId = tab.id
+                  openTab(tab)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(tab.id == activeBrowserTabId ? .blue : .gray)
+                .help(tab.url)
               }
             }
-            ScrollView {
+            .padding(.vertical, 2)
+          }
+        }
+      }
+
+      WebContainer(store: webStore)
+        .frame(minHeight: 460)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    .padding(12)
+  }
+
+  private var controlCenterPane: some View {
+    let columns = [
+      GridItem(.adaptive(minimum: 360, maximum: 520), spacing: 10),
+    ]
+
+    return VStack(spacing: 12) {
+      GroupBox("Project + Integration Controls") {
+        VStack(alignment: .leading, spacing: 10) {
+          HStack(spacing: 10) {
+            TextField("Project root", text: $projectRootInput)
+              .textFieldStyle(.roundedBorder)
+            Button("Apply Path") {
+              serverManager.projectRoot = projectRootInput
+              UserDefaults.standard.set(projectRootInput, forKey: "PODProjectRoot")
+            }
+          }
+          HStack(spacing: 10) {
+            Button("Refresh Core Status") {
+              Task {
+                providerStatusText = await performRequest(path: "/api/providers/status")
+                extensionsStatusText = await performRequest(path: "/api/extensions")
+                autonomyStatusText = await performRequest(path: "/api/agent/autonomy")
+                approvalsStatusText = await performRequest(path: "/api/agent/approvals")
+                skillsStatusText = await performRequest(path: "/api/skills")
+                tasksStatusText = await performRequest(path: "/api/agent/tasks")
+                macStatusText = await performRequest(path: "/api/mac/apps")
+                watchStatusText = await performRequest(path: "/api/watch/sources")
+              }
+            }
+            Button("Refresh Integrations") {
+              refreshIntegrationStatus()
+            }
+            Button("Prepare Workspace") {
+              runIntegrationRunbook("prepare_observer_workspace")
+            }
+            Button("Launch Watch") {
+              runIntegrationRunbook("launch_watch_surface")
+            }
+          }
+        }
+      }
+
+      ScrollView {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+          GroupBox("Integrations") {
+            VStack(alignment: .leading, spacing: 6) {
+              HStack(spacing: 8) {
+                Button("Repair Provider") {
+                  runIntegrationRunbook("repair_provider_route")
+                }
+                Button("Recover LiveKit") {
+                  runIntegrationRunbook("recover_livekit_bridge")
+                }
+              }
               Text(integrationsStatusText + "\n\n" + integrationActionStatusText + "\n\n" + bridgeStatusText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .font(.system(size: 10, weight: .regular, design: .monospaced))
                 .textSelection(.enabled)
             }
-            .frame(height: 72)
           }
-          .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity)
 
-        GroupBox("Provider") {
-          VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-              Button("Refresh") {
-                Task {
-                  providerStatusText = await performRequest(path: "/api/providers/status")
+          GroupBox("Provider") {
+            VStack(alignment: .leading, spacing: 6) {
+              HStack(spacing: 8) {
+                Button("Refresh") {
+                  Task {
+                    providerStatusText = await performRequest(path: "/api/providers/status")
+                  }
+                }
+                Button("Start Claude Login") {
+                  Task {
+                    providerStatusText = await performRequest(path: "/api/claude/login/start", method: "POST", body: [:])
+                  }
+                }
+                Button("Check Claude Session") {
+                  Task {
+                    providerStatusText = await performRequest(path: "/api/claude/login/status")
+                  }
                 }
               }
-              Button("Start Claude Login") {
-                Task {
-                  providerStatusText = await performRequest(path: "/api/claude/login/start", method: "POST", body: [:])
-                }
-              }
-              Button("Check Claude Session") {
-                Task {
-                  providerStatusText = await performRequest(path: "/api/claude/login/status")
-                }
-              }
-            }
-            ScrollView {
               Text(providerStatusText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .font(.system(size: 10, weight: .regular, design: .monospaced))
                 .textSelection(.enabled)
             }
-            .frame(height: 72)
           }
-          .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity)
 
-        GroupBox("Extensions + Autonomy") {
-          VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-              Button("Refresh Ext") {
-                Task {
-                  extensionsStatusText = await performRequest(path: "/api/extensions")
+          GroupBox("Extensions + Autonomy") {
+            VStack(alignment: .leading, spacing: 6) {
+              HStack(spacing: 8) {
+                Button("Refresh Ext") {
+                  Task {
+                    extensionsStatusText = await performRequest(path: "/api/extensions")
+                  }
+                }
+                Button("Enable X") {
+                  Task {
+                    extensionsStatusText = await performRequest(path: "/api/extensions/x-social/enable", method: "POST", body: [:])
+                  }
+                }
+                Button("Disable X") {
+                  Task {
+                    extensionsStatusText = await performRequest(path: "/api/extensions/x-social/disable", method: "POST", body: [:])
+                  }
+                }
+                Button("Enable Code") {
+                  Task {
+                    extensionsStatusText = await performRequest(path: "/api/extensions/code-workspace/enable", method: "POST", body: [:])
+                  }
+                }
+                Button("Disable Code") {
+                  Task {
+                    extensionsStatusText = await performRequest(path: "/api/extensions/code-workspace/disable", method: "POST", body: [:])
+                  }
                 }
               }
-              Button("Enable X") {
-                Task {
-                  extensionsStatusText = await performRequest(path: "/api/extensions/x-social/enable", method: "POST", body: [:])
+              HStack(spacing: 8) {
+                Button("Autonomy On") {
+                  Task {
+                    autonomyStatusText = await performRequest(
+                      path: "/api/agent/autonomy",
+                      method: "POST",
+                      body: ["enabled": true]
+                    )
+                  }
+                }
+                Button("Autonomy Off") {
+                  Task {
+                    autonomyStatusText = await performRequest(
+                      path: "/api/agent/autonomy",
+                      method: "POST",
+                      body: ["enabled": false]
+                    )
+                  }
+                }
+                Button("Refresh Auto") {
+                  Task {
+                    autonomyStatusText = await performRequest(path: "/api/agent/autonomy")
+                  }
                 }
               }
-              Button("Disable X") {
-                Task {
-                  extensionsStatusText = await performRequest(path: "/api/extensions/x-social/disable", method: "POST", body: [:])
-                }
-              }
-              Button("Enable Code") {
-                Task {
-                  extensionsStatusText = await performRequest(path: "/api/extensions/code-workspace/enable", method: "POST", body: [:])
-                }
-              }
-              Button("Disable Code") {
-                Task {
-                  extensionsStatusText = await performRequest(path: "/api/extensions/code-workspace/disable", method: "POST", body: [:])
-                }
-              }
-            }
-            HStack(spacing: 8) {
-              Button("Autonomy On") {
-                Task {
-                  autonomyStatusText = await performRequest(
-                    path: "/api/agent/autonomy",
-                    method: "POST",
-                    body: ["enabled": true]
-                  )
-                }
-              }
-              Button("Autonomy Off") {
-                Task {
-                  autonomyStatusText = await performRequest(
-                    path: "/api/agent/autonomy",
-                    method: "POST",
-                    body: ["enabled": false]
-                  )
-                }
-              }
-              Button("Refresh Auto") {
-                Task {
-                  autonomyStatusText = await performRequest(path: "/api/agent/autonomy")
-                }
-              }
-            }
-            ScrollView {
               Text(extensionsStatusText + "\n\n" + autonomyStatusText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .font(.system(size: 10, weight: .regular, design: .monospaced))
                 .textSelection(.enabled)
             }
-            .frame(height: 72)
           }
-          .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity)
 
-        GroupBox("Approvals") {
-          VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-              TextField("Approval ID", text: $approvalId)
-                .textFieldStyle(.roundedBorder)
-              Button("Refresh Queue") {
-                Task {
-                  approvalsStatusText = await performRequest(path: "/api/agent/approvals")
+          GroupBox("Approvals") {
+            VStack(alignment: .leading, spacing: 6) {
+              HStack(spacing: 8) {
+                TextField("Approval ID", text: $approvalId)
+                  .textFieldStyle(.roundedBorder)
+                Button("Refresh Queue") {
+                  Task {
+                    approvalsStatusText = await performRequest(path: "/api/agent/approvals")
+                  }
                 }
               }
-            }
-            HStack(spacing: 8) {
-              Button("Approve") {
-                let id = approvalId.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !id.isEmpty else { return }
-                Task {
-                  approvalsStatusText = await performRequest(
-                    path: "/api/agent/approvals/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)/approve",
-                    method: "POST",
-                    body: [:]
-                  )
+              HStack(spacing: 8) {
+                Button("Approve") {
+                  let id = approvalId.trimmingCharacters(in: .whitespacesAndNewlines)
+                  guard !id.isEmpty else { return }
+                  Task {
+                    approvalsStatusText = await performRequest(
+                      path: "/api/agent/approvals/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)/approve",
+                      method: "POST",
+                      body: [:]
+                    )
+                  }
+                }
+                Button("Reject") {
+                  let id = approvalId.trimmingCharacters(in: .whitespacesAndNewlines)
+                  guard !id.isEmpty else { return }
+                  Task {
+                    approvalsStatusText = await performRequest(
+                      path: "/api/agent/approvals/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)/reject",
+                      method: "POST",
+                      body: [:]
+                    )
+                  }
                 }
               }
-              Button("Reject") {
-                let id = approvalId.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !id.isEmpty else { return }
-                Task {
-                  approvalsStatusText = await performRequest(
-                    path: "/api/agent/approvals/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)/reject",
-                    method: "POST",
-                    body: [:]
-                  )
-                }
-              }
-            }
-            ScrollView {
               Text(approvalsStatusText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .font(.system(size: 10, weight: .regular, design: .monospaced))
                 .textSelection(.enabled)
             }
-            .frame(height: 72)
           }
-          .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity)
 
-        GroupBox("Skills + Tasks + Watch") {
-          VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-              TextField("Skill ID", text: $selectedSkillId)
-                .textFieldStyle(.roundedBorder)
-              Button("Run Skill") {
-                Task {
-                  skillsStatusText = await performRequest(
-                    path: "/api/skills/run",
-                    method: "POST",
-                    body: [
-                      "skillId": selectedSkillId,
-                      "args": ["prompt": "Run from native panel"],
-                    ]
-                  )
+          GroupBox("Skills + Tasks + Watch") {
+            VStack(alignment: .leading, spacing: 6) {
+              HStack(spacing: 8) {
+                TextField("Skill ID", text: $selectedSkillId)
+                  .textFieldStyle(.roundedBorder)
+                Button("Run Skill") {
+                  Task {
+                    skillsStatusText = await performRequest(
+                      path: "/api/skills/run",
+                      method: "POST",
+                      body: [
+                        "skillId": selectedSkillId,
+                        "args": ["prompt": "Run from native panel"],
+                      ]
+                    )
+                  }
                 }
-              }
-              Button("Refresh Skills") {
-                Task {
-                  skillsStatusText = await performRequest(path: "/api/skills")
-                }
-              }
-            }
-            HStack(spacing: 8) {
-              Button("Create Task") {
-                Task {
-                  tasksStatusText = await performRequest(
-                    path: "/api/agent/tasks",
-                    method: "POST",
-                    body: [
-                      "prompt": "Open Antigravity and prep workspace context",
-                      "skillId": selectedSkillId,
-                    ]
-                  )
-                }
-              }
-              Button("Refresh Tasks") {
-                Task {
-                  tasksStatusText = await performRequest(path: "/api/agent/tasks")
-                }
-              }
-              Button("Refresh Mac/Watch") {
-                Task {
-                  let apps = await performRequest(path: "/api/mac/apps")
-                  let watch = await performRequest(path: "/api/watch/sources")
-                  macStatusText = apps
-                  watchStatusText = watch
-                }
-              }
-            }
-            HStack(spacing: 8) {
-              TextField("Watch Source", text: $selectedWatchSource)
-                .textFieldStyle(.roundedBorder)
-              Button("Start Watch") {
-                Task {
-                  watchStatusText = await performRequest(
-                    path: "/api/watch/start",
-                    method: "POST",
-                    body: [
-                      "sourceId": selectedWatchSource,
-                    ]
-                  )
-                  if let start = watchStatusText.range(of: "\"id\":\""),
-                    let end = watchStatusText[start.upperBound...].firstIndex(of: "\"")
-                  {
-                    selectedWatchSessionId = String(watchStatusText[start.upperBound..<end])
+                Button("Refresh Skills") {
+                  Task {
+                    skillsStatusText = await performRequest(path: "/api/skills")
                   }
                 }
               }
-              Button("Stop Watch") {
-                Task {
-                  watchStatusText = await performRequest(
-                    path: "/api/watch/stop",
-                    method: "POST",
-                    body: [
-                      "sessionId": selectedWatchSessionId,
-                    ]
-                  )
+              HStack(spacing: 8) {
+                Button("Create Task") {
+                  Task {
+                    tasksStatusText = await performRequest(
+                      path: "/api/agent/tasks",
+                      method: "POST",
+                      body: [
+                        "prompt": "Open Antigravity and prep workspace context",
+                        "skillId": selectedSkillId,
+                      ]
+                    )
+                  }
+                }
+                Button("Refresh Tasks") {
+                  Task {
+                    tasksStatusText = await performRequest(path: "/api/agent/tasks")
+                  }
+                }
+                Button("Refresh Mac/Watch") {
+                  Task {
+                    let apps = await performRequest(path: "/api/mac/apps")
+                    let watch = await performRequest(path: "/api/watch/sources")
+                    macStatusText = apps
+                    watchStatusText = watch
+                  }
                 }
               }
-            }
-            ScrollView {
+              HStack(spacing: 8) {
+                TextField("Watch Source", text: $selectedWatchSource)
+                  .textFieldStyle(.roundedBorder)
+                Button("Start Watch") {
+                  Task {
+                    watchStatusText = await performRequest(
+                      path: "/api/watch/start",
+                      method: "POST",
+                      body: [
+                        "sourceId": selectedWatchSource,
+                      ]
+                    )
+                    if let start = watchStatusText.range(of: "\"id\":\""),
+                      let end = watchStatusText[start.upperBound...].firstIndex(of: "\"")
+                    {
+                      selectedWatchSessionId = String(watchStatusText[start.upperBound..<end])
+                    }
+                  }
+                }
+                Button("Stop Watch") {
+                  Task {
+                    watchStatusText = await performRequest(
+                      path: "/api/watch/stop",
+                      method: "POST",
+                      body: [
+                        "sessionId": selectedWatchSessionId,
+                      ]
+                    )
+                  }
+                }
+              }
               Text(skillsStatusText + "\n\n" + tasksStatusText + "\n\n" + macStatusText + "\n\n" + watchStatusText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .font(.system(size: 10, weight: .regular, design: .monospaced))
                 .textSelection(.enabled)
             }
-            .frame(height: 72)
           }
-          .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity)
       }
-
-      WebContainer(store: webStore)
-
-      ScrollView {
-        Text(serverManager.lastOutput)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .font(.system(size: 11, weight: .regular, design: .monospaced))
-          .textSelection(.enabled)
-          .padding(8)
-      }
-      .frame(height: 140)
-      .background(Color.black.opacity(0.06))
-      .clipShape(RoundedRectangle(cornerRadius: 8))
     }
     .padding(12)
+  }
+
+  private var logsPane: some View {
+    ScrollView {
+      Text(serverManager.lastOutput)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .font(.system(size: 11, weight: .regular, design: .monospaced))
+        .textSelection(.enabled)
+        .padding(8)
+    }
+    .background(Color.black.opacity(0.06))
+    .clipShape(RoundedRectangle(cornerRadius: 10))
+    .padding(12)
+    .frame(maxHeight: .infinity)
+  }
+
+  var body: some View {
+    NavigationSplitView {
+      List(selection: $paneSelection) {
+        ForEach(SuitePane.allCases) { pane in
+          Label(pane.rawValue, systemImage: pane.systemImage)
+            .tag(pane)
+        }
+      }
+      .listStyle(.sidebar)
+      .navigationSplitViewColumnWidth(240)
+    } detail: {
+      Group {
+        switch paneSelection {
+        case .dashboard:
+          dashboardPane
+        case .controlCenter:
+          controlCenterPane
+        case .logs:
+          logsPane
+        }
+      }
+    }
+    .toolbar { toolbarContent }
     .frame(minWidth: 1100, minHeight: 760)
     .onAppear {
       serverManager.projectRoot = projectRootInput
