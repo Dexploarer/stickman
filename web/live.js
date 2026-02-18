@@ -2,8 +2,38 @@ const MAX_EVENTS = 240;
 const events = [];
 let source = null;
 let socket = null;
+const query = new URLSearchParams(window.location.search);
+let pinnedSessionId = (query.get("sessionId") || "").trim();
+const pinnedSourceId = (query.get("sourceId") || "").trim();
+const pinnedTaskId = (query.get("taskId") || "").trim();
 
 const $ = (id) => document.getElementById(id);
+
+const updateFilterLabel = () => {
+  const node = $("live-filter");
+  if (!node) return;
+  const parts = [];
+  if (pinnedSessionId) parts.push(`session=${pinnedSessionId}`);
+  if (pinnedSourceId) parts.push(`source=${pinnedSourceId}`);
+  if (pinnedTaskId) parts.push(`task=${pinnedTaskId}`);
+  node.textContent = parts.length ? `Filter: ${parts.join(" | ")}` : "Filter: all watch sessions";
+};
+
+const frameMatchesFilter = (payload) => {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+  if (pinnedSessionId && String(payload.watchSessionId || "").trim() !== pinnedSessionId) {
+    return false;
+  }
+  if (pinnedSourceId && String(payload.sourceId || "").trim() !== pinnedSourceId) {
+    return false;
+  }
+  if (pinnedTaskId && String(payload.taskId || "").trim() !== pinnedTaskId) {
+    return false;
+  }
+  return true;
+};
 
 const render = () => {
   const stream = $("live-stream");
@@ -66,7 +96,14 @@ const sanitizeEvent = (event) => {
 
 const ingestEvent = (event) => {
   if (!event || typeof event !== "object") return;
-  if (event.type === "frame" && event.payload?.frame && $("live-frame")) {
+  if (event.type === "watch_session_started" && !pinnedSessionId) {
+    const startedId = String(event.payload?.watchSessionId || "").trim();
+    if (startedId) {
+      pinnedSessionId = startedId;
+      updateFilterLabel();
+    }
+  }
+  if (event.type === "frame" && event.payload?.frame && $("live-frame") && frameMatchesFilter(event.payload)) {
     $("live-frame").src = String(event.payload.frame);
   }
   events.push(sanitizeEvent(event));
@@ -161,6 +198,12 @@ const loadSnapshot = async () => {
     const parsed = await response.json();
     const rows = Array.isArray(parsed?.events) ? parsed.events : [];
     events.splice(0, events.length, ...rows.slice(-MAX_EVENTS));
+    const latestFrame = [...rows]
+      .reverse()
+      .find((event) => event?.type === "frame" && frameMatchesFilter(event?.payload || {}));
+    if (latestFrame?.payload?.frame && $("live-frame")) {
+      $("live-frame").src = String(latestFrame.payload.frame);
+    }
     render();
   } catch {
     // ignore snapshot errors
@@ -177,5 +220,6 @@ $("live-reconnect")?.addEventListener("click", async () => {
   connectWebSocket();
 });
 
+updateFilterLabel();
 await loadSnapshot();
 connectWebSocket();

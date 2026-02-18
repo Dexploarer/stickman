@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import cors from "cors";
 import express from "express";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Socket } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -122,6 +122,18 @@ const liveEventHistory: Array<{
   ts: string;
   payload: Record<string, unknown>;
 }> = [];
+interface WatchFrameEntry {
+  id: string;
+  ts: string;
+  watchSessionId?: string;
+  sourceId: WatchSource["id"];
+  taskId?: string;
+  frame: string;
+  mime: string;
+}
+const MAX_WATCH_FRAME_PAYLOAD_CHARS = 1_500_000;
+const MAX_WATCH_FRAME_HISTORY = 180;
+const watchFrameHistory: WatchFrameEntry[] = [];
 
 const emitLiveEvent = (type: string, payload: Record<string, unknown>) => {
   const event = {
@@ -674,6 +686,125 @@ const listWatchSources = (): WatchSource[] => {
   ];
 };
 
+const normalizeWatchSourceId = (value: string): WatchSource["id"] | null => {
+  if (value === "embedded-browser" || value === "antigravity" || value === "chrome" || value === "terminal") {
+    return value;
+  }
+  return null;
+};
+
+const normalizeWatchFps = (value: unknown, fallback: number): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return Math.max(1, Math.min(6, Math.floor(fallback || 2)));
+  }
+  return Math.max(1, Math.min(6, Math.floor(parsed)));
+};
+
+const sanitizeWatchRoomFragment = (value: string): string => {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 28);
+};
+
+const buildLivekitRoomName = (roomPrefix: string, sourceId: WatchSource["id"], taskId?: string): string => {
+  const prefix = sanitizeWatchRoomFragment(roomPrefix || "milady-cowork") || "milady-cowork";
+  const source = sanitizeWatchRoomFragment(sourceId) || "watch";
+  const task = taskId ? sanitizeWatchRoomFragment(taskId.slice(0, 12)) : "";
+  const stamp = Date.now().toString(36);
+  const room = [prefix, source, task, stamp].filter(Boolean).join("-");
+  return room.slice(0, 64);
+};
+
+const isImageMimeType = (value: string): boolean => {
+  return /^image\/[a-z0-9.+-]+$/i.test(value.trim());
+};
+
+const isSupportedFramePayload = (value: string): boolean => {
+  const trimmed = value.trim();
+  return trimmed.startsWith("data:image/") || /^https?:\/\//i.test(trimmed);
+};
+
+const pushWatchFrame = (entry: Omit<WatchFrameEntry, "id" | "ts">) => {
+  watchFrameHistory.push({
+    id: randomUUID(),
+    ts: new Date().toISOString(),
+    ...entry,
+  });
+  if (watchFrameHistory.length > MAX_WATCH_FRAME_HISTORY) {
+    watchFrameHistory.splice(0, watchFrameHistory.length - MAX_WATCH_FRAME_HISTORY);
+  }
+};
+
+const getLatestWatchFrame = (filter: {
+  watchSessionId?: string;
+  sourceId?: WatchSource["id"];
+  taskId?: string;
+}): WatchFrameEntry | null => {
+  for (let index = watchFrameHistory.length - 1; index >= 0; index -= 1) {
+    const item = watchFrameHistory[index];
+    if (filter.watchSessionId && item.watchSessionId !== filter.watchSessionId) {
+      continue;
+    }
+    if (filter.sourceId && item.sourceId !== filter.sourceId) {
+      continue;
+    }
+    if (filter.taskId && item.taskId !== filter.taskId) {
+      continue;
+    }
+    return item;
+  }
+  return null;
+};
+
+const encodeBase64Url = (value: string): string =>
+  Buffer.from(value)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+
+const mintLivekitAccessToken = (input: {
+  apiKey: string;
+  apiSecret: string;
+  room: string;
+  identity: string;
+  participantName?: string;
+  ttlSeconds?: number;
+  metadata?: Record<string, unknown>;
+}): { token: string; expiresAt: string; expiresInSeconds: number } => {
+  const now = Math.floor(Date.now() / 1000);
+  const expiresInSeconds = Math.max(60, Math.min(60 * 60 * 6, Math.floor(input.ttlSeconds || 3600)));
+  const payload = {
+    iss: input.apiKey,
+    sub: input.identity,
+    iat: now,
+    nbf: Math.max(0, now - 5),
+    exp: now + expiresInSeconds,
+    jti: randomUUID(),
+    name: input.participantName || input.identity,
+    metadata: input.metadata ? JSON.stringify(input.metadata) : undefined,
+    video: {
+      room: input.room,
+      roomJoin: true,
+      canPublish: false,
+      canSubscribe: true,
+      canPublishData: true,
+    },
+  };
+  const headerRaw = encodeBase64Url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const payloadRaw = encodeBase64Url(JSON.stringify(payload));
+  const signatureRaw = createHmac("sha256", input.apiSecret).update(`${headerRaw}.${payloadRaw}`).digest("base64url");
+  return {
+    token: `${headerRaw}.${payloadRaw}.${signatureRaw}`,
+    expiresAt: new Date((now + expiresInSeconds) * 1000).toISOString(),
+    expiresInSeconds,
+  };
+};
+
 const escapeXml = (value: string): string =>
   value
     .replace(/&/g, "&amp;")
@@ -721,6 +852,15 @@ const emitWatchFrame = (session: WatchSession) => {
     frame,
     mime: "image/svg+xml",
   };
+  session.lastFrameAt = new Date().toISOString();
+  session.frameCount = (session.frameCount || 0) + 1;
+  pushWatchFrame({
+    watchSessionId: session.id,
+    sourceId: session.sourceId,
+    taskId: session.taskId,
+    frame,
+    mime: "image/svg+xml",
+  });
   emitLiveEvent("frame", payload);
   if (session.taskId) {
     taskLog(session.taskId, "frame", "watch_frame_tick", payload);
@@ -747,20 +887,43 @@ const stopWatchSession = (watchSessionId: string, reason: string) => {
   });
 };
 
-const startWatchSession = (input: { sourceId: WatchSource["id"]; taskId?: string; fps: number }) => {
+const startWatchSession = (input: {
+  sourceId: WatchSource["id"];
+  taskId?: string;
+  fps: number;
+  livekit: {
+    enabled: boolean;
+    configured: boolean;
+    wsUrl: string | null;
+    roomPrefix: string;
+    streamMode: "events_only" | "events_and_frames";
+  };
+}) => {
   for (const session of watchSessions.values()) {
     if (session.active && session.sourceId === input.sourceId && session.taskId === input.taskId) {
       stopWatchSession(session.id, "replaced");
     }
   }
+  const useLivekitTransport = Boolean(
+    input.livekit.enabled &&
+      input.livekit.configured &&
+      input.livekit.wsUrl &&
+      input.livekit.streamMode === "events_and_frames",
+  );
+  const livekitRoom = useLivekitTransport ? buildLivekitRoomName(input.livekit.roomPrefix, input.sourceId, input.taskId) : undefined;
+  const livekitParticipantIdentity = useLivekitTransport ? `watch-${randomUUID().slice(0, 12)}` : undefined;
   const now = new Date().toISOString();
   const session: WatchSession = {
     id: randomUUID(),
     sourceId: input.sourceId,
     taskId: input.taskId,
+    transport: useLivekitTransport ? "livekit" : "local",
+    livekitRoom,
+    livekitParticipantIdentity,
     active: true,
     startedAt: now,
     fps: Math.max(1, Math.min(input.fps, 6)),
+    frameCount: 0,
   };
   watchSessions.set(session.id, session);
   emitLiveEvent("watch_session_started", {
@@ -768,6 +931,9 @@ const startWatchSession = (input: { sourceId: WatchSource["id"]; taskId?: string
     sourceId: session.sourceId,
     taskId: session.taskId || null,
     fps: session.fps,
+    transport: session.transport,
+    livekitRoom: session.livekitRoom || null,
+    livekitWsUrl: useLivekitTransport ? input.livekit.wsUrl : null,
   });
   emitWatchFrame(session);
   const intervalMs = Math.max(333, Math.floor(1000 / session.fps));
@@ -799,11 +965,30 @@ const normalizeLivekitWsUrl = (value: string | undefined): string | undefined =>
   return undefined;
 };
 
-const resolveLivekitStatus = (onboarding: OnboardingState) => {
+interface ResolvedLivekitStatus {
+  enabled: boolean;
+  mode: "disabled" | "needs_config" | "ready";
+  configured: boolean;
+  missing: Array<"ws_url" | "api_key" | "api_secret">;
+  wsUrl: string | null;
+  apiKeySet: boolean;
+  apiSecretSet: boolean;
+  roomPrefix: string;
+  streamMode: "events_only" | "events_and_frames";
+  framesEnabled: boolean;
+  canMintToken: boolean;
+  activeLivekitSessions: number;
+  activeRooms: string[];
+  guidance: string;
+}
+
+const resolveLivekitStatus = (onboarding: OnboardingState): ResolvedLivekitStatus => {
   const wsUrl = normalizeLivekitWsUrl(onboarding.livekit.wsUrl || appConfig.livekit.wsUrl);
   const apiKey = String(onboarding.livekit.apiKey || appConfig.livekit.apiKey || "").trim();
   const roomPrefix = String(onboarding.livekit.roomPrefix || appConfig.livekit.roomPrefix || "milady-cowork").trim();
-  const streamMode = onboarding.livekit.streamMode === "events_and_frames" ? "events_and_frames" : "events_only";
+  const streamMode: ResolvedLivekitStatus["streamMode"] =
+    onboarding.livekit.streamMode === "events_and_frames" ? "events_and_frames" : "events_only";
+  const framesEnabled = streamMode === "events_and_frames";
   const apiSecretSet = Boolean(appConfig.livekit.apiSecret);
   const enabled = Boolean(onboarding.livekit.enabled);
   const missing: Array<"ws_url" | "api_key" | "api_secret"> = [];
@@ -818,6 +1003,9 @@ const resolveLivekitStatus = (onboarding: OnboardingState) => {
   }
   const configured = missing.length === 0;
   const mode = enabled ? (configured ? "ready" : "needs_config") : "disabled";
+  const activeLivekitSessions = Array.from(watchSessions.values()).filter(
+    (session) => session.active && session.transport === "livekit",
+  );
   return {
     enabled,
     mode,
@@ -828,9 +1016,21 @@ const resolveLivekitStatus = (onboarding: OnboardingState) => {
     apiSecretSet,
     roomPrefix,
     streamMode,
+    framesEnabled,
+    canMintToken: Boolean(enabled && configured && framesEnabled),
+    activeLivekitSessions: activeLivekitSessions.length,
+    activeRooms: [
+      ...new Set(
+        activeLivekitSessions
+          .map((session) => session.livekitRoom)
+          .filter((room): room is string => typeof room === "string" && room.length > 0),
+      ),
+    ],
     guidance:
-      configured && enabled
+      configured && enabled && framesEnabled
         ? "LiveKit is ready for optional remote cowork transport."
+        : configured && enabled
+          ? "LiveKit is enabled, but streamMode=events_only. Set streamMode=events_and_frames for watch transport."
         : "Set wsUrl, apiKey, and LIVEKIT_API_SECRET to enable remote LiveKit streaming.",
   };
 };
@@ -2576,6 +2776,8 @@ app.get("/api/cowork/state", async (_req, res) => {
       watch: {
         active: activeWatchSessions.length,
         total: watchSessions.size,
+        livekitActive: activeWatchSessions.filter((session) => session.transport === "livekit").length,
+        frameBufferSize: watchFrameHistory.length,
       },
       livekit: {
         enabled: livekit.enabled,
@@ -2686,6 +2888,86 @@ app.post("/api/livekit/config", async (req, res) => {
   res.json({
     ok: true,
     livekit: status,
+  });
+});
+
+app.post("/api/livekit/token", async (req, res) => {
+  const sessionId = typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : "";
+  const sourceRaw = typeof req.body?.sourceId === "string" ? req.body.sourceId.trim() : "";
+  const sourceId = normalizeWatchSourceId(sourceRaw || "embedded-browser");
+  if (sourceRaw && !sourceId) {
+    res.status(400).json({ ok: false, error: "Invalid sourceId." });
+    return;
+  }
+  const taskId = typeof req.body?.taskId === "string" ? req.body.taskId.trim() : "";
+  const requestedIdentity = typeof req.body?.identity === "string" ? req.body.identity.trim() : "";
+  const requestedName = typeof req.body?.participantName === "string" ? req.body.participantName.trim() : "";
+
+  let session: WatchSession | undefined;
+  if (sessionId) {
+    session = watchSessions.get(sessionId);
+    if (!session) {
+      res.status(404).json({ ok: false, error: "Watch session not found." });
+      return;
+    }
+  }
+
+  const onboarding = await getOnboardingState();
+  const livekit = resolveLivekitStatus(onboarding);
+  if (!livekit.enabled || !livekit.configured || livekit.streamMode !== "events_and_frames") {
+    res.status(400).json({
+      ok: false,
+      error: "LiveKit token mint requires livekit.enabled=true, full credentials, and streamMode=events_and_frames.",
+      livekit,
+    });
+    return;
+  }
+
+  const resolvedSource = session?.sourceId || sourceId || "embedded-browser";
+  const resolvedTaskId = session?.taskId || taskId || undefined;
+  const room = session?.livekitRoom || buildLivekitRoomName(livekit.roomPrefix, resolvedSource, resolvedTaskId);
+  const identity = /^[A-Za-z0-9._-]{3,64}$/.test(requestedIdentity)
+    ? requestedIdentity
+    : `viewer-${randomUUID().slice(0, 12)}`;
+  const participantName = requestedName.slice(0, 64) || "milady-observer";
+  const apiKey = String(onboarding.livekit.apiKey || appConfig.livekit.apiKey || "").trim();
+  const apiSecret = String(appConfig.livekit.apiSecret || "").trim();
+  const wsUrl = normalizeLivekitWsUrl(onboarding.livekit.wsUrl || appConfig.livekit.wsUrl);
+  if (!apiKey || !apiSecret || !wsUrl) {
+    res.status(400).json({
+      ok: false,
+      error: "LiveKit credentials are incomplete. Configure wsUrl, apiKey, and LIVEKIT_API_SECRET.",
+    });
+    return;
+  }
+
+  const tokenBundle = mintLivekitAccessToken({
+    apiKey,
+    apiSecret,
+    room,
+    identity,
+    participantName,
+    metadata: {
+      sourceId: resolvedSource,
+      taskId: resolvedTaskId || null,
+      sessionId: session?.id || null,
+    },
+  });
+
+  res.json({
+    ok: true,
+    livekit: {
+      wsUrl,
+      room,
+      token: tokenBundle.token,
+      identity,
+      participantName,
+      expiresAt: tokenBundle.expiresAt,
+      expiresInSeconds: tokenBundle.expiresInSeconds,
+      sessionId: session?.id || null,
+      sourceId: resolvedSource,
+      taskId: resolvedTaskId || null,
+    },
   });
 });
 
@@ -3344,19 +3626,39 @@ app.post("/api/mac/policy", async (req, res) => {
 });
 
 app.get("/api/watch/sources", (_req, res) => {
+  const latestFrame = getLatestWatchFrame({});
   res.json({
     ok: true,
     sources: listWatchSources(),
     sessions: Array.from(watchSessions.values()),
+    frameBuffer: {
+      size: watchFrameHistory.length,
+      latest:
+        latestFrame == null
+          ? null
+          : {
+              ts: latestFrame.ts,
+              sourceId: latestFrame.sourceId,
+              taskId: latestFrame.taskId || null,
+              watchSessionId: latestFrame.watchSessionId || null,
+              mime: latestFrame.mime,
+            },
+    },
   });
 });
 
 app.post("/api/watch/start", async (req, res) => {
-  const sourceId = String(req.body?.sourceId || "").trim() as WatchSource["id"];
+  const sourceRaw = String(req.body?.sourceId || "").trim();
+  const sourceId = normalizeWatchSourceId(sourceRaw || "embedded-browser");
   const taskId = typeof req.body?.taskId === "string" ? req.body.taskId.trim() : undefined;
   const onboarding = await getOnboardingState();
+  const fps = normalizeWatchFps(req.body?.fps, onboarding.watch.fps);
   if (!onboarding.watch.enabled) {
     res.status(400).json({ ok: false, error: "Watch mode is disabled." });
+    return;
+  }
+  if (!sourceId) {
+    res.status(400).json({ ok: false, error: "Invalid sourceId." });
     return;
   }
   const source = listWatchSources().find((item) => item.id === sourceId);
@@ -3372,14 +3674,27 @@ app.post("/api/watch/start", async (req, res) => {
     res.status(404).json({ ok: false, error: "Task not found for watch session." });
     return;
   }
+  const livekit = resolveLivekitStatus(onboarding);
   const session = startWatchSession({
     sourceId,
     taskId: taskId || undefined,
-    fps: onboarding.watch.fps,
+    fps,
+    livekit,
   });
   res.json({
     ok: true,
     session,
+    remoteTransport:
+      session.transport === "livekit"
+        ? {
+            mode: "livekit",
+            wsUrl: livekit.wsUrl,
+            room: session.livekitRoom,
+            tokenEndpoint: "/api/livekit/token",
+          }
+        : {
+            mode: "local",
+          },
   });
 });
 
@@ -3401,8 +3716,30 @@ app.post("/api/watch/stop", (req, res) => {
   });
 });
 
+app.get("/api/watch/frame/latest", (req, res) => {
+  const watchSessionId = typeof req.query?.sessionId === "string" ? req.query.sessionId.trim() : "";
+  const sourceRaw = typeof req.query?.sourceId === "string" ? req.query.sourceId.trim() : "";
+  const taskId = typeof req.query?.taskId === "string" ? req.query.taskId.trim() : "";
+  const sourceId = sourceRaw ? normalizeWatchSourceId(sourceRaw) : null;
+  if (sourceRaw && !sourceId) {
+    res.status(400).json({ ok: false, error: "Invalid sourceId filter." });
+    return;
+  }
+  const frame = getLatestWatchFrame({
+    watchSessionId: watchSessionId || undefined,
+    sourceId: sourceId || undefined,
+    taskId: taskId || undefined,
+  });
+  res.json({
+    ok: true,
+    frame: frame || null,
+  });
+});
+
 app.post("/api/watch/frame", (req, res) => {
-  const sourceId = String(req.body?.sourceId || "").trim();
+  const sourceRaw = String(req.body?.sourceId || "").trim();
+  const sourceId = normalizeWatchSourceId(sourceRaw);
+  const watchSessionId = typeof req.body?.watchSessionId === "string" ? req.body.watchSessionId.trim() : "";
   const taskId = typeof req.body?.taskId === "string" ? req.body.taskId.trim() : "";
   const frame = typeof req.body?.frame === "string" ? req.body.frame.trim() : "";
   const mime = typeof req.body?.mime === "string" ? req.body.mime.trim() : "image/png";
@@ -3410,9 +3747,46 @@ app.post("/api/watch/frame", (req, res) => {
     res.status(400).json({ ok: false, error: "sourceId and frame are required." });
     return;
   }
+  if (!isImageMimeType(mime)) {
+    res.status(400).json({ ok: false, error: "mime must be an image/* value." });
+    return;
+  }
+  if (!isSupportedFramePayload(frame)) {
+    res.status(400).json({ ok: false, error: "frame must be a data:image URI or an http(s) URL." });
+    return;
+  }
+  if (frame.length > MAX_WATCH_FRAME_PAYLOAD_CHARS) {
+    res.status(413).json({
+      ok: false,
+      error: `frame exceeds max payload size (${MAX_WATCH_FRAME_PAYLOAD_CHARS} chars).`,
+    });
+    return;
+  }
+  let watchSession: WatchSession | undefined;
+  if (watchSessionId) {
+    watchSession = watchSessions.get(watchSessionId);
+    if (!watchSession || !watchSession.active) {
+      res.status(404).json({ ok: false, error: "Watch session not found or inactive." });
+      return;
+    }
+    if (watchSession.sourceId !== sourceId) {
+      res.status(409).json({ ok: false, error: "watch session source does not match sourceId." });
+      return;
+    }
+    watchSession.lastFrameAt = new Date().toISOString();
+    watchSession.frameCount = (watchSession.frameCount || 0) + 1;
+  }
+  pushWatchFrame({
+    watchSessionId: watchSession?.id,
+    sourceId,
+    taskId: taskId || undefined,
+    frame,
+    mime,
+  });
   emitLiveEvent("frame", {
     sourceId,
     taskId: taskId || null,
+    watchSessionId: watchSession?.id || null,
     frame,
     mime,
   });

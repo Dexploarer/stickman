@@ -444,8 +444,24 @@ form {
   background: #10191d;
 }
 
+.cowork-watch-meta {
+  border: 1px solid rgba(15, 36, 41, 0.14);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 8px;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  word-break: break-word;
+}
+
 .cowork-lane .sub-panel pre {
   max-height: 180px;
+}
+
+#watch-output {
+  max-height: 190px;
 }
 
 pre {

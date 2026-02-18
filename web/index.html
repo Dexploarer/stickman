@@ -464,6 +464,8 @@
               <option value="chrome">chrome</option>
               <option value="terminal">terminal</option>
             </select>
+            <label>Watch FPS</label>
+            <input id="watch-fps" type="number" min="1" max="6" value="2" />
             <label>Watch Session ID</label>
             <input id="watch-session-id" type="text" placeholder="watch session id" />
             <div class="button-row">
@@ -489,6 +491,7 @@
             <div class="button-row">
               <button class="ghost" type="button" id="livekit-refresh">Refresh LiveKit</button>
               <button class="ghost" type="button" id="livekit-save">Save LiveKit</button>
+              <button class="ghost" type="button" id="livekit-token">Mint Viewer Token</button>
             </div>
             <pre id="livekit-output"></pre>
             <pre id="mac-policy-output"></pre>
@@ -616,13 +619,17 @@
                 <h3>Live Agent Observer</h3>
                 <div class="button-row">
                   <button class="ghost" type="button" id="cowork-live-refresh">Refresh Stream</button>
+                  <button class="ghost" type="button" id="cowork-watch-active">Watch Active Task</button>
+                  <button class="ghost" type="button" id="cowork-watch-token">Mint LiveKit Token</button>
                 </div>
+                <div id="cowork-watch-meta" class="cowork-watch-meta">No active watch session.</div>
                 <iframe
                   id="cowork-live-iframe"
                   class="cowork-live-frame"
                   title="Agent Live Observer"
                   src="/live.html"
                 ></iframe>
+                <pre id="watch-output"></pre>
               </section>
             </div>
           </article>

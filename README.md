@@ -217,9 +217,11 @@ This creates and launches:
 - `GET /api/watch/sources`
 - `POST /api/watch/start`
 - `POST /api/watch/stop`
+- `GET /api/watch/frame/latest`
 - `POST /api/watch/frame`
 - `GET /api/livekit/status`
 - `POST /api/livekit/config`
+- `POST /api/livekit/token`
 - `GET /api/code/status`
 - `POST /api/code/plan`
 - `POST /api/code/exec`

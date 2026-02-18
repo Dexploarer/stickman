@@ -44,6 +44,27 @@ const apiGet = async (endpoint: string) => {
   };
 };
 
+const apiPost = async (endpoint: string, payload: Record<string, unknown>) => {
+  const response = await fetch(`${baseUrl}${endpoint}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  let body: unknown = text;
+  try {
+    body = JSON.parse(text || "{}");
+  } catch {
+    // keep text
+  }
+  return {
+    status: response.status,
+    body,
+  };
+};
+
 beforeAll(async () => {
   server = spawn("bun", ["run", "dev"], {
     cwd: repoRoot,
@@ -108,21 +129,27 @@ describe("api read-only smoke", () => {
     const tasks = await apiGet("/api/agent/tasks");
     const macApps = await apiGet("/api/mac/apps");
     const watchSources = await apiGet("/api/watch/sources");
+    const watchLatestFrame = await apiGet("/api/watch/frame/latest");
     const livekit = await apiGet("/api/livekit/status");
+    const livekitTokenInvalidSource = await apiPost("/api/livekit/token", { sourceId: "invalid-source" });
     const codeStatus = await apiGet("/api/code/status");
     const wsUpgrade = await apiGet("/api/live/ws");
 
     expect(tasks.status).toBe(200);
     expect(macApps.status).toBe(200);
     expect(watchSources.status).toBe(200);
+    expect(watchLatestFrame.status).toBe(200);
     expect(livekit.status).toBe(200);
+    expect(livekitTokenInvalidSource.status).toBe(400);
     expect(codeStatus.status).toBe(200);
     expect(wsUpgrade.status).toBe(426);
 
     expect((tasks.body as Record<string, unknown>).ok).toBe(true);
     expect(Array.isArray((macApps.body as Record<string, unknown>).apps)).toBe(true);
     expect(Array.isArray((watchSources.body as Record<string, unknown>).sources)).toBe(true);
+    expect((watchLatestFrame.body as Record<string, unknown>).ok).toBe(true);
     expect((livekit.body as Record<string, unknown>).ok).toBe(true);
+    expect((livekitTokenInvalidSource.body as Record<string, unknown>).ok).toBe(false);
     expect((codeStatus.body as Record<string, unknown>).ok).toBe(true);
     expect((wsUpgrade.body as Record<string, unknown>).ok).toBe(false);
   });

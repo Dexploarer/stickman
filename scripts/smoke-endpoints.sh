@@ -120,14 +120,17 @@ req mac_policy_get GET /api/mac/policy 200
 req mac_open_denied POST /api/mac/apps/open 403 '{"appId":"unknown"}'
 req mac_focus_denied POST /api/mac/apps/focus 403 '{"appId":"unknown"}'
 req watch_sources GET /api/watch/sources 200
+req watch_frame_latest GET /api/watch/frame/latest 200
 req livekit_status GET /api/livekit/status 200
+req livekit_token_invalid_source POST /api/livekit/token 400 '{"sourceId":"invalid-source"}'
 req livekit_config_invalid_prefix POST /api/livekit/config 400 '{"roomPrefix":"invalid prefix!"}'
 req livekit_config POST /api/livekit/config 200 '{"enabled":false,"streamMode":"events_only","roomPrefix":"milady-cowork"}'
 req watch_start_invalid POST /api/watch/start 400 '{"sourceId":"invalid-source"}'
-req watch_start_valid POST /api/watch/start 200 '{"sourceId":"embedded-browser"}'
+req watch_start_valid POST /api/watch/start 200 '{"sourceId":"embedded-browser","fps":2}'
 
 WATCH_ID=$(SMOKE_LAST_RESP="$SMOKE_LAST_RESP" node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync(process.env.SMOKE_LAST_RESP || "/tmp/mss_smoke_last_resp.json","utf8")); process.stdout.write(x.session?.id || "")')
 if [ -n "$WATCH_ID" ]; then
+  req watch_frame_invalid_source POST /api/watch/frame 400 '{"sourceId":"invalid-source","frame":"data:image/png;base64,AAAA"}'
   req watch_stop POST /api/watch/stop 200 "{\"sessionId\":\"${WATCH_ID}\"}"
 else
   echo "FAIL watch_id_parse [missing session id]"

@@ -474,10 +474,117 @@ const renderCoworkTaskBoard = () => {
   });
 };
 
+const resolveActiveWatchSession = () => {
+  const activeSessions = Array.isArray(state.coworkState?.active?.watchSessions) ? state.coworkState.active.watchSessions : [];
+  const selectedSessionId = ($("watch-session-id")?.value || "").trim();
+  if (selectedSessionId) {
+    const selected = activeSessions.find((session) => session.id === selectedSessionId);
+    if (selected) {
+      return selected;
+    }
+  }
+  return activeSessions[0] || null;
+};
+
+const setObserverIframeSession = (session) => {
+  const iframe = $("cowork-live-iframe");
+  if (!iframe) {
+    return;
+  }
+  const basePath = "/live.html";
+  if (!session?.id) {
+    iframe.setAttribute("src", basePath);
+    return;
+  }
+  const params = new URLSearchParams();
+  params.set("sessionId", String(session.id));
+  params.set("sourceId", String(session.sourceId || "embedded-browser"));
+  if (session.taskId) {
+    params.set("taskId", String(session.taskId));
+  }
+  iframe.setAttribute("src", `${basePath}?${params.toString()}`);
+};
+
+const renderWatchObserverMeta = () => {
+  const node = $("cowork-watch-meta");
+  if (!node) {
+    return;
+  }
+  const session = resolveActiveWatchSession();
+  if (!session) {
+    node.textContent = "No active watch session.";
+    return;
+  }
+  const lastFrame = session.lastFrameAt ? new Date(session.lastFrameAt).toLocaleTimeString() : "n/a";
+  const transport = session.transport || "local";
+  const room = session.livekitRoom ? ` room=${session.livekitRoom}` : "";
+  node.textContent = `session=${session.id} source=${session.sourceId} task=${session.taskId || "none"} transport=${transport}${room} frames=${
+    session.frameCount || 0
+  } last=${lastFrame}`;
+};
+
+const startWatchSessionFlow = async ({ sourceId, taskId, fps, outputId = "mac-policy-output" }) => {
+  const result = await apiPost("/api/watch/start", {
+    sourceId,
+    taskId: taskId || undefined,
+    fps: typeof fps === "number" && Number.isFinite(fps) ? fps : undefined,
+  });
+  setText(outputId, result);
+  if ($("watch-session-id") && result?.session?.id) {
+    $("watch-session-id").value = result.session.id;
+  }
+  setText("watch-output", {
+    session: result?.session || null,
+    remoteTransport: result?.remoteTransport || null,
+  });
+  await refreshMacApps();
+  await refreshCoworkState();
+  if (taskId && $("cowork-log-task-select")) {
+    $("cowork-log-task-select").value = taskId;
+  }
+  await refreshTaskLogTail();
+  renderWatchObserverMeta();
+  if (result?.session) {
+    setObserverIframeSession(result.session);
+  }
+  return result;
+};
+
+const mintLivekitViewerToken = async (outputId = "watch-output") => {
+  const activeSession = resolveActiveWatchSession();
+  const sessionId = ($("watch-session-id")?.value || activeSession?.id || "").trim();
+  const sourceId = ($("watch-source-select")?.value || activeSession?.sourceId || "embedded-browser").trim();
+  const taskId = ($("task-id")?.value || activeSession?.taskId || "").trim();
+  const result = await apiPost("/api/livekit/token", {
+    sessionId: sessionId || undefined,
+    sourceId: sourceId || undefined,
+    taskId: taskId || undefined,
+  });
+  let copiedToClipboard = false;
+  if (result?.livekit?.token && navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(String(result.livekit.token));
+      copiedToClipboard = true;
+    } catch {
+      copiedToClipboard = false;
+    }
+  }
+  const payload = {
+    ...result,
+    copiedToClipboard,
+  };
+  setText(outputId, payload);
+  if (outputId !== "watch-output") {
+    setText("watch-output", payload);
+  }
+  return result;
+};
+
 const refreshCoworkState = async () => {
   const result = await apiGet("/api/cowork/state");
   state.coworkState = result || null;
   renderCoworkMetrics();
+  renderWatchObserverMeta();
   setText("cowork-state-output", result);
   return result;
 };
@@ -585,6 +692,7 @@ const refreshMacApps = async () => {
       watchSelect.value = availableSourceIds[0];
     }
   }
+  renderWatchObserverMeta();
   return {
     apps,
     policy,
@@ -1223,6 +1331,9 @@ const fillOnboardingForm = () => {
   if ($("onb-watch-scope")) {
     $("onb-watch-scope").value = onboarding.watch?.captureScope || "agent_surfaces_only";
   }
+  if ($("watch-fps")) {
+    $("watch-fps").value = String(onboarding.watch?.fps || 2);
+  }
   updatePordieScopeHint();
   populateOnboardingModelSelectors();
 };
@@ -1625,7 +1736,42 @@ const bindDashboardEvents = () => {
       return;
     }
     const current = iframe.getAttribute("src") || "/live.html";
-    iframe.setAttribute("src", `${current.split("?")[0]}?t=${Date.now()}`);
+    try {
+      const parsed = new URL(current, window.location.origin);
+      parsed.searchParams.set("t", `${Date.now()}`);
+      iframe.setAttribute("src", `${parsed.pathname}?${parsed.searchParams.toString()}`);
+    } catch {
+      iframe.setAttribute("src", `/live.html?t=${Date.now()}`);
+    }
+  });
+
+  $("cowork-watch-active")?.addEventListener("click", async () => {
+    const sourceId = ($("watch-source-select")?.value || "").trim() || "embedded-browser";
+    const fps = toInt($("watch-fps")?.value, 2);
+    const candidateTask = (state.tasks || []).find((task) => ["running", "queued", "waiting_approval"].includes(task.status))
+      || (state.tasks || [])[0];
+    if (!candidateTask?.id) {
+      setText("watch-output", "No task available to watch.");
+      return;
+    }
+    try {
+      await startWatchSessionFlow({
+        sourceId,
+        taskId: candidateTask.id,
+        fps,
+        outputId: "watch-output",
+      });
+    } catch (error) {
+      setText("watch-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("cowork-watch-token")?.addEventListener("click", async () => {
+    try {
+      await mintLivekitViewerToken("watch-output");
+    } catch (error) {
+      setText("watch-output", error instanceof Error ? error.message : String(error));
+    }
   });
 
   $("cowork-quick-antigravity")?.addEventListener("click", async () => {
@@ -2177,25 +2323,18 @@ const bindDashboardEvents = () => {
   $("task-watch")?.addEventListener("click", async () => {
     const id = ($("task-id")?.value || "").trim();
     const sourceId = ($("watch-source-select")?.value || "").trim() || "embedded-browser";
+    const fps = toInt($("watch-fps")?.value, 2);
     if (!id) {
       setText("tasks-output", "Task ID is required.");
       return;
     }
     try {
-      const result = await apiPost("/api/watch/start", {
+      await startWatchSessionFlow({
         sourceId,
         taskId: id,
+        fps,
+        outputId: "mac-policy-output",
       });
-      setText("mac-policy-output", result);
-      if ($("watch-session-id") && result?.session?.id) {
-        $("watch-session-id").value = result.session.id;
-      }
-      await refreshMacApps();
-      await refreshCoworkState();
-      if ($("cowork-log-task-select")) {
-        $("cowork-log-task-select").value = id;
-      }
-      await refreshTaskLogTail();
     } catch (error) {
       setText("mac-policy-output", error instanceof Error ? error.message : String(error));
     }
@@ -2243,17 +2382,13 @@ const bindDashboardEvents = () => {
     if (action === "watch") {
       try {
         const sourceId = ($("watch-source-select")?.value || "").trim() || "embedded-browser";
-        const result = await apiPost("/api/watch/start", {
+        const fps = toInt($("watch-fps")?.value, 2);
+        await startWatchSessionFlow({
           sourceId,
           taskId,
+          fps,
+          outputId: "mac-policy-output",
         });
-        setText("mac-policy-output", result);
-        if ($("watch-session-id") && result?.session?.id) {
-          $("watch-session-id").value = result.session.id;
-        }
-        await refreshMacApps();
-        await refreshCoworkState();
-        await refreshTaskLogTail();
       } catch (error) {
         setText("mac-policy-output", error instanceof Error ? error.message : String(error));
       }
@@ -2356,20 +2491,18 @@ const bindDashboardEvents = () => {
   $("watch-start")?.addEventListener("click", async () => {
     const sourceId = ($("watch-source-select")?.value || "").trim();
     const taskId = ($("task-id")?.value || "").trim();
+    const fps = toInt($("watch-fps")?.value, 2);
     if (!sourceId) {
       setText("mac-policy-output", "Watch source is required.");
       return;
     }
     try {
-      const result = await apiPost("/api/watch/start", {
+      await startWatchSessionFlow({
         sourceId,
         taskId: taskId || undefined,
+        fps,
+        outputId: "mac-policy-output",
       });
-      setText("mac-policy-output", result);
-      if ($("watch-session-id") && result?.session?.id) {
-        $("watch-session-id").value = result.session.id;
-      }
-      await refreshMacApps();
     } catch (error) {
       setText("mac-policy-output", error instanceof Error ? error.message : String(error));
     }
@@ -2387,8 +2520,21 @@ const bindDashboardEvents = () => {
       });
       setText("mac-policy-output", result);
       await refreshMacApps();
+      await refreshCoworkState();
+      renderWatchObserverMeta();
+      if (!resolveActiveWatchSession()) {
+        setObserverIframeSession(null);
+      }
     } catch (error) {
       setText("mac-policy-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("watch-session-id")?.addEventListener("change", () => {
+    renderWatchObserverMeta();
+    const session = resolveActiveWatchSession();
+    if (session) {
+      setObserverIframeSession(session);
     }
   });
 
@@ -2428,6 +2574,14 @@ const bindDashboardEvents = () => {
       setText("livekit-output", result);
       await refreshLivekitStatus();
       await refreshCoworkState();
+    } catch (error) {
+      setText("livekit-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("livekit-token")?.addEventListener("click", async () => {
+    try {
+      await mintLivekitViewerToken("livekit-output");
     } catch (error) {
       setText("livekit-output", error instanceof Error ? error.message : String(error));
     }
@@ -2844,6 +2998,11 @@ const boot = async () => {
   await refreshMacApps();
   await refreshLivekitStatus();
   await refreshTaskLogTail();
+  renderWatchObserverMeta();
+  const initialWatchSession = resolveActiveWatchSession();
+  if (initialWatchSession) {
+    setObserverIframeSession(initialWatchSession);
+  }
   setInterval(async () => {
     try {
       await Promise.all([refreshTasks(), refreshApprovals(), refreshCoworkState(), refreshTaskLogTail()]);

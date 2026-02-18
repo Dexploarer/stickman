@@ -251,10 +251,15 @@ export interface WatchSession {
   id: string;
   sourceId: WatchSource["id"];
   taskId?: string;
+  transport: "local" | "livekit";
+  livekitRoom?: string;
+  livekitParticipantIdentity?: string;
   active: boolean;
   startedAt: string;
   endedAt?: string;
   fps: number;
+  lastFrameAt?: string;
+  frameCount: number;
 }
 
 export interface OpenRouterModelRecord {

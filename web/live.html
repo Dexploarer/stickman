@@ -45,6 +45,12 @@
         font-size: 12px;
       }
 
+      .filter {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+
       .dot {
         width: 8px;
         height: 8px;
@@ -139,6 +145,7 @@
         <div><span class="dot"></span><span id="live-connection">Connecting...</span></div>
         <div id="live-count">0 events</div>
       </section>
+      <div id="live-filter" class="filter">Filter: all watch sessions</div>
       <section class="actions">
         <button id="live-clear" type="button">Clear</button>
         <button id="live-reconnect" type="button">Reconnect</button>
