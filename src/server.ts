@@ -3,6 +3,7 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import { createHash, createHmac, randomUUID } from "node:crypto";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import type { Socket } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -691,6 +692,29 @@ interface CodeRunResponse {
   session?: ReturnType<typeof getWorkspaceSession>;
 }
 
+const resolveCodeWorkspaceRoot = (onboarding: OnboardingState): string => {
+  const configured = onboarding.extensions.code.workingDirectory?.trim();
+  if (!configured) {
+    return projectRoot;
+  }
+  const resolved = path.resolve(configured);
+  const rootWithSep = projectRoot.endsWith(path.sep) ? projectRoot : `${projectRoot}${path.sep}`;
+  if (resolved !== projectRoot && !resolved.startsWith(rootWithSep)) {
+    return projectRoot;
+  }
+  if (!existsSync(resolved)) {
+    return projectRoot;
+  }
+  try {
+    if (!statSync(resolved).isDirectory()) {
+      return projectRoot;
+    }
+  } catch {
+    return projectRoot;
+  }
+  return resolved;
+};
+
 const runCodeCommand = async (
   command: string,
   requestedCwd: string | undefined,
@@ -698,7 +722,7 @@ const runCodeCommand = async (
 ): Promise<CodeRunResponse> => {
   pruneCodeApprovalQueue();
   const onboarding = await getOnboardingState();
-  const defaultWorkspaceCwd = onboarding.extensions.code.workingDirectory?.trim() || projectRoot;
+  const defaultWorkspaceCwd = resolveCodeWorkspaceRoot(onboarding);
   const resolvedCwd = requestedCwd?.trim() ? requestedCwd.trim() : defaultWorkspaceCwd;
   emitLiveEvent("code_command_request", {
     command,
@@ -1387,7 +1411,7 @@ const runSkillRequest = async (
       approvalBypass: options?.approvalBypass || input.approvalBypass,
     },
     {
-      workspaceRoot: onboarding.extensions.code.workingDirectory || projectRoot,
+      workspaceRoot: resolveCodeWorkspaceRoot(onboarding),
       getSkillDefinition,
       isSkillEnabled: (id) => isSkillEnabled(id, enabledMap),
       requiresApproval: (category) => requiresApprovalFor.has(category),

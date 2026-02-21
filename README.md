@@ -1,6 +1,6 @@
 # Prompt or Die Social Suite
 
-Local-first social automation stack with onboarding, OpenRouter model orchestration, workflow automation, and both Web + TUI surfaces.
+Local-first social automation stack with onboarding, OpenRouter model orchestration, workflow automation, and Web + TUI + Electron surfaces.
 
 ## Location
 
@@ -179,23 +179,26 @@ LiveKit enable policy:
 
 - `POST /api/livekit/config` rejects `enabled=true` unless `wsUrl`, `apiKey`, and `LIVEKIT_API_SECRET` are all configured.
 
-## Native Apple App (Swift)
+## Electron Desktop App
+
+Start Electron with the built-in local Bun API server:
 
 ```bash
-cd "/Users/home/milady-social-suite/native/apple"
-swift run
+bun run electron:dev
 ```
 
-Install as a normal clickable macOS app on Desktop:
+Attach Electron to an already-running local server:
 
 ```bash
-cd "/Users/home/milady-social-suite/native/apple"
-bash build_app.sh
+bun run dev
+bun run electron:attach
 ```
 
-This creates and launches:
+Optional overrides:
 
-`~/Desktop/Prompt or Die Social Suite.app`
+- `POD_APP_URL` (default `http://127.0.0.1:8787`)
+- `POD_ELECTRON_START_SERVER=false` to skip spawning Bun
+- `POD_SERVER_COMMAND` to provide a custom server start command
 
 ## Main API Endpoints
 

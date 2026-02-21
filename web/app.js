@@ -1,6 +1,35 @@
 const HISTORY_KEY = "prompt-or-die-social-suite.history.v1";
 const COWORK_CHAT_KEY = "prompt-or-die-social-suite.cowork.chat.v1";
 const MAX_HISTORY = 50;
+const DASHBOARD_LAYOUT_KEY = "prompt-or-die-social-suite.dashboard.layout.v1";
+const DASHBOARD_VIEW_KEY = "prompt-or-die-social-suite.dashboard.view.v1";
+const DASHBOARD_PAGE_TABS = [
+  { id: "operations", label: "Operations" },
+  { id: "workspace", label: "Workspace" },
+  { id: "studio", label: "Studio" },
+  { id: "all", label: "All Pages" },
+];
+const DASHBOARD_SEGMENT_TABS = [
+  { id: "panel", label: "Panels" },
+  { id: "tool", label: "Tools" },
+  { id: "modal", label: "Modals" },
+];
+const DASHBOARD_PANEL_META_BY_TITLE = {
+  "Runtime Controls": { page: "operations", segment: "panel" },
+  "Quick Automations": { page: "operations", segment: "tool" },
+  "Recent Runs": { page: "operations", segment: "panel" },
+  "Approval Queue": { page: "operations", segment: "panel" },
+  "Skill Center": { page: "operations", segment: "tool" },
+  "Task Board": { page: "workspace", segment: "panel" },
+  "Mac Allowlist + Watch": { page: "operations", segment: "panel" },
+  "Agentic Co-Workspace": { page: "workspace", segment: "panel" },
+  "Login Refresh": { page: "studio", segment: "tool" },
+  "Command Studio": { page: "operations", segment: "tool" },
+  "AI Workflow Planner": { page: "studio", segment: "tool" },
+  "AI Chat Copilot": { page: "studio", segment: "tool" },
+  "AI Image Copilot": { page: "studio", segment: "tool" },
+  "X Algorithm OS Lab": { page: "studio", segment: "tool" },
+};
 
 const state = {
   catalog: [],
@@ -63,6 +92,515 @@ const parseMaybeJSON = (raw) => {
   } catch {
     return raw;
   }
+};
+
+const slugifyPanelId = (value) =>
+  String(value || "panel")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "panel";
+
+const normalizeDashboardView = (candidate) => {
+  const pageIds = new Set(DASHBOARD_PAGE_TABS.map((item) => item.id));
+  const segmentIds = new Set(DASHBOARD_SEGMENT_TABS.map((item) => item.id));
+  const page = pageIds.has(candidate?.page) ? candidate.page : "operations";
+  const segment = segmentIds.has(candidate?.segment) ? candidate.segment : "panel";
+  return { page, segment };
+};
+
+const readDashboardView = () => {
+  const raw = window.localStorage.getItem(DASHBOARD_VIEW_KEY);
+  if (!raw) {
+    return normalizeDashboardView();
+  }
+  const parsed = parseMaybeJSON(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return normalizeDashboardView();
+  }
+  return normalizeDashboardView(parsed);
+};
+
+const writeDashboardView = (view) => {
+  window.localStorage.setItem(DASHBOARD_VIEW_KEY, JSON.stringify(normalizeDashboardView(view)));
+};
+
+const readDashboardLayout = () => {
+  const raw = window.localStorage.getItem(DASHBOARD_LAYOUT_KEY);
+  if (!raw) {
+    return null;
+  }
+  const parsed = parseMaybeJSON(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed;
+};
+
+const writeDashboardLayout = (layout) => {
+  window.localStorage.setItem(DASHBOARD_LAYOUT_KEY, JSON.stringify(layout));
+};
+
+const deriveDashboardPanelMeta = (title) => {
+  const known = DASHBOARD_PANEL_META_BY_TITLE[title];
+  if (known) {
+    return known;
+  }
+  return {
+    page: "operations",
+    segment: "panel",
+  };
+};
+
+const initDashboardWorkbench = () => {
+  const root = $("dashboard-root");
+  if (!root || root.dataset.workbenchReady === "true") {
+    return;
+  }
+  const leftColumn = root.querySelector(":scope > aside.stack");
+  const rightColumn = root.querySelector(":scope > section.stack");
+  if (!(leftColumn instanceof HTMLElement) || !(rightColumn instanceof HTMLElement)) {
+    return;
+  }
+  const panels = [
+    ...leftColumn.querySelectorAll(":scope > article.panel"),
+    ...rightColumn.querySelectorAll(":scope > article.panel"),
+  ];
+  if (!panels.length) {
+    return;
+  }
+
+  const workbench = document.createElement("div");
+  workbench.className = "dashboard-workbench";
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "dashboard-workbench-bar";
+
+  const pageTabs = document.createElement("div");
+  pageTabs.className = "dashboard-tab-group";
+  DASHBOARD_PAGE_TABS.forEach((tab) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost dashboard-tab";
+    button.dataset.dashboardPage = tab.id;
+    button.textContent = tab.label;
+    pageTabs.appendChild(button);
+  });
+
+  const segmentTabs = document.createElement("div");
+  segmentTabs.className = "dashboard-tab-group";
+  DASHBOARD_SEGMENT_TABS.forEach((tab) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost dashboard-tab";
+    button.dataset.dashboardSegment = tab.id;
+    button.textContent = tab.label;
+    segmentTabs.appendChild(button);
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "dashboard-workbench-actions";
+
+  const openToolsModalBtn = document.createElement("button");
+  openToolsModalBtn.type = "button";
+  openToolsModalBtn.className = "ghost";
+  openToolsModalBtn.textContent = "Open Tool Modal";
+  actions.appendChild(openToolsModalBtn);
+
+  const resetLayoutBtn = document.createElement("button");
+  resetLayoutBtn.type = "button";
+  resetLayoutBtn.className = "ghost";
+  resetLayoutBtn.textContent = "Reset Layout";
+  actions.appendChild(resetLayoutBtn);
+
+  toolbar.append(pageTabs, segmentTabs, actions);
+
+  const panelGrid = document.createElement("div");
+  panelGrid.className = "dashboard-panel-grid";
+  panelGrid.id = "dashboard-panel-grid";
+
+  const toolsModal = document.createElement("div");
+  toolsModal.className = "dashboard-modal-overlay hidden";
+  toolsModal.setAttribute("aria-hidden", "true");
+
+  const modalCard = document.createElement("div");
+  modalCard.className = "dashboard-modal-card";
+  modalCard.setAttribute("role", "dialog");
+  modalCard.setAttribute("aria-modal", "true");
+
+  const modalHeader = document.createElement("div");
+  modalHeader.className = "dashboard-modal-head";
+
+  const modalTitle = document.createElement("h3");
+  modalTitle.textContent = "Tool Segments";
+  modalHeader.appendChild(modalTitle);
+
+  const modalClose = document.createElement("button");
+  modalClose.type = "button";
+  modalClose.className = "ghost";
+  modalClose.textContent = "Close";
+  modalHeader.appendChild(modalClose);
+
+  const modalHint = document.createElement("p");
+  modalHint.className = "summary";
+  modalHint.textContent = "Jump into tool-focused panels and keep the dashboard arranged around your current workflow.";
+
+  const modalList = document.createElement("div");
+  modalList.className = "dashboard-tool-list";
+
+  modalCard.append(modalHeader, modalHint, modalList);
+  toolsModal.appendChild(modalCard);
+
+  const panelMap = new Map();
+  const initialPanelOrder = [];
+  const seenPanelIds = new Set();
+
+  panels.forEach((panel, index) => {
+    if (!(panel instanceof HTMLElement)) {
+      return;
+    }
+    const titleNode = panel.querySelector("h2");
+    const title = (titleNode?.textContent || `Panel ${index + 1}`).trim();
+    const meta = deriveDashboardPanelMeta(title);
+
+    let panelId = slugifyPanelId(title);
+    while (seenPanelIds.has(panelId)) {
+      panelId = `${panelId}-${index + 1}`;
+    }
+    seenPanelIds.add(panelId);
+
+    panel.dataset.panelId = panelId;
+    panel.dataset.panelTitle = title;
+    panel.dataset.panelPage = meta.page;
+    panel.dataset.panelSegment = meta.segment;
+    panel.classList.add("dashboard-panel-card");
+    panel.draggable = true;
+
+    const dragHandle = document.createElement("div");
+    dragHandle.className = "panel-drag-handle";
+
+    const grip = document.createElement("span");
+    grip.className = "panel-drag-grip";
+    grip.textContent = "⋮⋮";
+
+    const label = document.createElement("span");
+    label.className = "panel-drag-label";
+    label.textContent = title;
+
+    const tag = document.createElement("span");
+    tag.className = "panel-drag-tag";
+    tag.textContent = `${meta.page} / ${meta.segment}`;
+
+    const handleActions = document.createElement("div");
+    handleActions.className = "panel-handle-actions";
+
+    const sizeToggle = document.createElement("button");
+    sizeToggle.type = "button";
+    sizeToggle.className = "ghost panel-size-toggle";
+    sizeToggle.textContent = "Wide";
+    sizeToggle.dataset.panelId = panelId;
+    handleActions.appendChild(sizeToggle);
+
+    dragHandle.append(grip, label, tag, handleActions);
+    panel.prepend(dragHandle);
+
+    panelMap.set(panelId, panel);
+    initialPanelOrder.push(panelId);
+    panelGrid.appendChild(panel);
+  });
+
+  const syncPanelSizeButtonText = () => {
+    panelMap.forEach((panel, panelId) => {
+      const button = panel.querySelector(`.panel-size-toggle[data-panel-id="${panelId}"]`);
+      if (!(button instanceof HTMLButtonElement)) {
+        return;
+      }
+      button.textContent = panel.classList.contains("panel-wide") ? "Normal" : "Wide";
+    });
+  };
+
+  const savePanelLayout = () => {
+    const order = [...panelGrid.querySelectorAll(".dashboard-panel-card")]
+      .map((panel) => panel.dataset.panelId)
+      .filter(Boolean);
+    const wide = [...panelGrid.querySelectorAll(".dashboard-panel-card.panel-wide")]
+      .map((panel) => panel.dataset.panelId)
+      .filter(Boolean);
+    writeDashboardLayout({ order, wide });
+  };
+
+  const loadPanelLayout = () => {
+    const saved = readDashboardLayout();
+    if (!saved) {
+      return;
+    }
+    const savedOrder = Array.isArray(saved.order) ? saved.order : [];
+    savedOrder.forEach((panelId) => {
+      const panel = panelMap.get(panelId);
+      if (panel) {
+        panelGrid.appendChild(panel);
+      }
+    });
+    initialPanelOrder.forEach((panelId) => {
+      const panel = panelMap.get(panelId);
+      if (panel && panel.parentElement !== panelGrid) {
+        panelGrid.appendChild(panel);
+      }
+    });
+    const savedWide = new Set(Array.isArray(saved.wide) ? saved.wide : []);
+    panelMap.forEach((panel, panelId) => {
+      panel.classList.toggle("panel-wide", savedWide.has(panelId));
+    });
+    syncPanelSizeButtonText();
+  };
+
+  const openToolsModal = () => {
+    toolsModal.classList.remove("hidden");
+    toolsModal.classList.add("open");
+    toolsModal.setAttribute("aria-hidden", "false");
+  };
+
+  const closeToolsModal = () => {
+    toolsModal.classList.add("hidden");
+    toolsModal.classList.remove("open");
+    toolsModal.setAttribute("aria-hidden", "true");
+  };
+
+  const renderToolsModalItems = () => {
+    modalList.innerHTML = "";
+    const toolPanels = [...panelMap.values()].filter((panel) => panel.dataset.panelSegment === "tool");
+    if (!toolPanels.length) {
+      const empty = document.createElement("p");
+      empty.className = "summary";
+      empty.textContent = "No tool segments are currently available.";
+      modalList.appendChild(empty);
+      return;
+    }
+    toolPanels.forEach((panel) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost dashboard-tool-item";
+      button.dataset.panelId = panel.dataset.panelId || "";
+      button.textContent = `${panel.dataset.panelTitle || "Tool"}  |  ${panel.dataset.panelPage || "operations"}`;
+      modalList.appendChild(button);
+    });
+  };
+
+  const viewState = readDashboardView();
+  let currentPage = viewState.page;
+  let currentSegment = viewState.segment;
+
+  const updateToolbarState = () => {
+    pageTabs.querySelectorAll("button[data-dashboard-page]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.dashboardPage === currentPage);
+    });
+    segmentTabs.querySelectorAll("button[data-dashboard-segment]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.dashboardSegment === currentSegment);
+    });
+  };
+
+  const applyDashboardFilters = () => {
+    const inModalMode = currentSegment === "modal";
+    panelGrid.classList.toggle("hidden", inModalMode);
+    if (inModalMode) {
+      openToolsModal();
+    } else {
+      closeToolsModal();
+    }
+    panelMap.forEach((panel) => {
+      const page = panel.dataset.panelPage || "operations";
+      const segment = panel.dataset.panelSegment || "panel";
+      const matchesPage = currentPage === "all" || page === currentPage;
+      const matchesSegment = currentSegment === "panel" ? segment !== "tool" : currentSegment === "tool" ? segment === "tool" : true;
+      panel.classList.toggle("hidden", !(matchesPage && matchesSegment && !inModalMode));
+    });
+    updateToolbarState();
+    writeDashboardView({
+      page: currentPage,
+      segment: currentSegment,
+    });
+  };
+
+  const focusPanelById = (panelId) => {
+    const panel = panelMap.get(panelId);
+    if (!panel) {
+      return;
+    }
+    const panelPage = panel.dataset.panelPage || "operations";
+    const panelSegment = panel.dataset.panelSegment === "tool" ? "tool" : "panel";
+    currentPage = panelPage;
+    currentSegment = panelSegment;
+    applyDashboardFilters();
+    panel.classList.add("dashboard-panel-focus");
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => {
+      panel.classList.remove("dashboard-panel-focus");
+    }, 900);
+  };
+
+  let draggedPanel = null;
+  panelMap.forEach((panel) => {
+    panel.addEventListener("dragstart", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.closest(".panel-drag-handle")) {
+        event.preventDefault();
+        return;
+      }
+      draggedPanel = panel;
+      panel.classList.add("panel-dragging");
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", panel.dataset.panelId || "");
+      }
+    });
+    panel.addEventListener("dragend", () => {
+      panel.classList.remove("panel-dragging");
+      draggedPanel = null;
+      savePanelLayout();
+    });
+  });
+
+  panelGrid.addEventListener("dragover", (event) => {
+    if (!draggedPanel) {
+      return;
+    }
+    event.preventDefault();
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const destination = target.closest(".dashboard-panel-card");
+    if (!(destination instanceof HTMLElement) || destination === draggedPanel) {
+      return;
+    }
+    const rect = destination.getBoundingClientRect();
+    const shouldPlaceAfter = event.clientY > rect.top + rect.height / 2;
+    if (shouldPlaceAfter) {
+      panelGrid.insertBefore(draggedPanel, destination.nextElementSibling);
+      return;
+    }
+    panelGrid.insertBefore(draggedPanel, destination);
+  });
+
+  panelGrid.addEventListener("drop", (event) => {
+    event.preventDefault();
+    savePanelLayout();
+  });
+
+  toolbar.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const page = target.dataset.dashboardPage;
+    if (page) {
+      currentPage = page;
+      if (currentSegment === "modal") {
+        currentSegment = "panel";
+      }
+      applyDashboardFilters();
+      return;
+    }
+    const segment = target.dataset.dashboardSegment;
+    if (segment) {
+      currentSegment = segment;
+      applyDashboardFilters();
+    }
+  });
+
+  panelGrid.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    if (target.classList.contains("panel-size-toggle")) {
+      const panelId = target.dataset.panelId || "";
+      const panel = panelMap.get(panelId);
+      if (!panel) {
+        return;
+      }
+      panel.classList.toggle("panel-wide");
+      syncPanelSizeButtonText();
+      savePanelLayout();
+    }
+  });
+
+  openToolsModalBtn.addEventListener("click", () => {
+    openToolsModal();
+  });
+
+  modalClose.addEventListener("click", () => {
+    closeToolsModal();
+    if (currentSegment === "modal") {
+      currentSegment = "panel";
+      applyDashboardFilters();
+    }
+  });
+
+  toolsModal.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target === toolsModal) {
+      closeToolsModal();
+      if (currentSegment === "modal") {
+        currentSegment = "panel";
+        applyDashboardFilters();
+      }
+      return;
+    }
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const panelButton = target.closest(".dashboard-tool-item");
+    if (!(panelButton instanceof HTMLElement)) {
+      return;
+    }
+    const panelId = panelButton.dataset.panelId || "";
+    closeToolsModal();
+    focusPanelById(panelId);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+    if (toolsModal.classList.contains("open")) {
+      closeToolsModal();
+      if (currentSegment === "modal") {
+        currentSegment = "panel";
+        applyDashboardFilters();
+      }
+    }
+  });
+
+  resetLayoutBtn.addEventListener("click", () => {
+    window.localStorage.removeItem(DASHBOARD_LAYOUT_KEY);
+    window.localStorage.removeItem(DASHBOARD_VIEW_KEY);
+    initialPanelOrder.forEach((panelId) => {
+      const panel = panelMap.get(panelId);
+      if (!panel) {
+        return;
+      }
+      panel.classList.remove("panel-wide");
+      panelGrid.appendChild(panel);
+    });
+    currentPage = "operations";
+    currentSegment = "panel";
+    syncPanelSizeButtonText();
+    applyDashboardFilters();
+    savePanelLayout();
+  });
+
+  renderToolsModalItems();
+  loadPanelLayout();
+  applyDashboardFilters();
+
+  workbench.append(toolbar, panelGrid);
+  root.classList.remove("layout");
+  root.classList.add("dashboard-root-workbench");
+  root.append(workbench, toolsModal);
+
+  leftColumn.remove();
+  rightColumn.remove();
+  root.dataset.workbenchReady = "true";
 };
 
 const splitPathInput = (raw) => {
@@ -4512,6 +5050,7 @@ const boot = async () => {
   renderHistory();
   renderCoworkChat();
   renderCoworkConversations();
+  initDashboardWorkbench();
   bindOnboardingEvents();
   bindDashboardEvents();
   await refreshHealth();

@@ -123,6 +123,175 @@ html {
   gap: 14px;
 }
 
+.dashboard-root-workbench {
+  display: block;
+}
+
+.dashboard-workbench {
+  display: grid;
+  gap: 12px;
+}
+
+.dashboard-workbench-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 13px;
+  border: 1px solid rgba(15, 36, 41, 0.15);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.dashboard-tab-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dashboard-workbench-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dashboard-tab {
+  min-width: 92px;
+}
+
+.dashboard-tab.active {
+  border-color: rgba(213, 78, 43, 0.45);
+  background: rgba(245, 190, 127, 0.45);
+  color: var(--ink);
+}
+
+.dashboard-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.dashboard-panel-card {
+  position: relative;
+}
+
+.dashboard-panel-card.panel-wide {
+  grid-column: span 2;
+}
+
+.panel-drag-handle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -2px 0 10px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  border: 1px dashed rgba(15, 36, 41, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+  cursor: grab;
+  user-select: none;
+}
+
+.panel-drag-handle:active {
+  cursor: grabbing;
+}
+
+.panel-drag-grip {
+  color: rgba(15, 36, 41, 0.52);
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.panel-drag-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.panel-drag-tag {
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.panel-handle-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-size-toggle {
+  padding: 5px 8px;
+  font-size: 0.72rem;
+}
+
+.panel-dragging {
+  opacity: 0.62;
+}
+
+.dashboard-panel-focus {
+  animation: dashboard-panel-focus 820ms ease;
+}
+
+@keyframes dashboard-panel-focus {
+  0% {
+    box-shadow: 0 0 0 0 rgba(213, 78, 43, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 16px rgba(213, 78, 43, 0);
+  }
+}
+
+.dashboard-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 36, 41, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.dashboard-modal-card {
+  width: min(780px, 100%);
+  max-height: 82vh;
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(12, 21, 24, 0.95);
+  color: #dcf5f1;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.dashboard-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dashboard-modal-head h3 {
+  margin: 0;
+}
+
+.dashboard-tool-list {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-tool-item {
+  text-align: left;
+  width: 100%;
+}
+
 .stack {
   display: grid;
   gap: 14px;
@@ -687,6 +856,12 @@ pre {
   .grid-4 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+  .dashboard-panel-grid {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+  .dashboard-panel-card.panel-wide {
+    grid-column: span 1;
+  }
   .cowork-grid {
     grid-template-columns: 1fr;
   }
@@ -704,6 +879,17 @@ pre {
 @media (max-width: 900px) {
   .split {
     grid-template-columns: 1fr;
+  }
+  .dashboard-workbench-bar {
+    align-items: stretch;
+  }
+  .dashboard-tab-group,
+  .dashboard-workbench-actions {
+    width: 100%;
+  }
+  .dashboard-tab-group button,
+  .dashboard-workbench-actions button {
+    flex: 1 1 auto;
   }
   .grid-4 {
     grid-template-columns: 1fr;
