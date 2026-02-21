@@ -75,6 +75,8 @@ describe("dashboard workbench layout", () => {
     expect(dashboardHtml).not.toContain("id=\"integration-claude-login\"");
     expect(dashboardHtml).not.toContain("id=\"code-plan-form\"");
     expect(dashboardHtml).not.toContain("id=\"terminal-pty-refresh\"");
+    expect(dashboardHtml).not.toContain("id=\"mac-allow-terminal\"");
+    expect(dashboardHtml).not.toContain("coding mission context");
   });
 
   it("does not keep stale app bindings for removed coding ids", () => {

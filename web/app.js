@@ -1862,12 +1862,12 @@ const refreshMacApps = async () => {
   ]);
   state.macApps = Array.isArray(apps?.apps) ? apps.apps : [];
   state.watchSources = Array.isArray(watch?.sources) ? watch.sources : [];
+  const allowedUiAppIds = new Set(["antigravity", "chrome"]);
+  const uiMacApps = state.macApps.filter((app) => allowedUiAppIds.has(app.id));
+  const uiWatchSources = state.watchSources.filter((source) => source.id === "embedded-browser" || allowedUiAppIds.has(source.id));
   const allowlist = Array.isArray(policy?.macControl?.appAllowlist) ? policy.macControl.appAllowlist : [];
   if ($("mac-allow-antigravity")) {
     $("mac-allow-antigravity").checked = allowlist.includes("antigravity");
-  }
-  if ($("mac-allow-terminal")) {
-    $("mac-allow-terminal").checked = allowlist.includes("terminal");
   }
   if ($("mac-allow-chrome")) {
     $("mac-allow-chrome").checked = allowlist.includes("chrome");
@@ -1876,14 +1876,14 @@ const refreshMacApps = async () => {
   if (macAppSelect) {
     const current = macAppSelect.value;
     macAppSelect.innerHTML = "";
-    (state.macApps || []).forEach((app) => {
+    uiMacApps.forEach((app) => {
       const option = document.createElement("option");
       option.value = app.id;
       option.textContent = `${app.id}${app.available ? "" : " (unavailable)"}`;
       option.disabled = !app.available;
       macAppSelect.appendChild(option);
     });
-    const availableIds = (state.macApps || []).filter((app) => app.available).map((app) => app.id);
+    const availableIds = uiMacApps.filter((app) => app.available).map((app) => app.id);
     if (current && availableIds.includes(current)) {
       macAppSelect.value = current;
     } else if (availableIds.length) {
@@ -1899,14 +1899,14 @@ const refreshMacApps = async () => {
   if (watchSelect) {
     const current = watchSelect.value;
     watchSelect.innerHTML = "";
-    (state.watchSources || []).forEach((source) => {
+    uiWatchSources.forEach((source) => {
       const option = document.createElement("option");
       option.value = source.id;
       option.textContent = `${source.id}${source.available ? "" : " (unavailable)"}`;
       option.disabled = !source.available;
       watchSelect.appendChild(option);
     });
-    const availableSourceIds = (state.watchSources || []).filter((source) => source.available).map((source) => source.id);
+    const availableSourceIds = uiWatchSources.filter((source) => source.available).map((source) => source.id);
     if (current && availableSourceIds.includes(current)) {
       watchSelect.value = current;
     } else if (availableSourceIds.length) {
@@ -3732,7 +3732,6 @@ const bindDashboardEvents = () => {
     try {
       const appAllowlist = [
         $("mac-allow-antigravity")?.checked ? "antigravity" : null,
-        $("mac-allow-terminal")?.checked ? "terminal" : null,
         $("mac-allow-chrome")?.checked ? "chrome" : null,
       ].filter(Boolean);
       const result = await apiPost("/api/mac/policy", {
