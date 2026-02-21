@@ -1,6 +1,6 @@
 # Prompt or Die Social Suite
 
-Local-first social automation stack with onboarding, OpenRouter model orchestration, workflow automation, and Web + TUI + Electron surfaces.
+Local-first social + X automation stack with onboarding, OpenRouter model orchestration, workflow automation, and Web + TUI + Electron surfaces.
 
 ## Location
 
@@ -17,11 +17,10 @@ Local-first social automation stack with onboarding, OpenRouter model orchestrat
 - Mixed autonomy controls (auto-read/signal analysis, approval-gated write/auth actions)
 - Agentic cowork UI with Milady-style 3-lane layout (conversations, task chat, autonomy stream)
 - Embedded live observer iframe (`/live.html`) backed by realtime SSE events (`/api/live/events`)
-- Native coding-agent workflow with guarded workspace command execution (`code-workspace` extension)
 - Skill registry and task runtime (`/api/skills`, `/api/agent/tasks`) with guarded approvals
-- Mac control bridge for Antigravity, Terminal, and Chrome with allowlist policy (`/api/mac/apps`, `/api/mac/policy`)
+- Mac control bridge for Antigravity and Chrome with allowlist policy (`/api/mac/apps`, `/api/mac/policy`)
 - Watch-along screenshare channel with websocket stream (`/api/live/ws`) and watch sessions (`/api/watch/*`)
-- CLI bridges honor local overrides: `POD_CODEX_CLI_PATH`, `CODEX_CLI_COMMAND`, `CLAUDE_CLI_COMMAND`
+- CLI bridge honors local overrides for subscription mode: `CLAUDE_CLI_COMMAND`
 - Local SQLite state engine (`better-sqlite3`, WAL mode) for onboarding, integration bridge, action history, and code session transcripts
 - Legacy JSON state (`.state/onboarding.json`, `.state/integration-bridge.json`) is migration bootstrap only once DB is initialized
 - Onboarding for:
@@ -71,7 +70,6 @@ scripts/new-worktree-bootstrap.sh feature/branch-name /path/to/new/worktree
 - `python3: command not found`: install Python 3 and re-run `bun run setup`.
 - `x-local/setup_env.sh missing`: ensure the repository checkout includes `x-local/`.
 - `claude command not found`: install Claude CLI to use subscription mode (`claude login`), or set `CLAUDE_CLI_COMMAND` if your binary path/syntax differs.
-- `codex command not found`: install Codex CLI or configure the coding executor override in your local env.
 - `Antigravity app not found`: install Antigravity if you want `antigravity.open` skills enabled.
 - `Google Chrome.app not found`: install Chrome if you want external browser handoff enabled.
 - `OPENROUTER_API_KEY not set`: text fallback may still work in Claude mode, but image/video/embedding/voice require OpenRouter.
@@ -91,8 +89,6 @@ Setup now also guarantees per-worktree local state scaffolding:
 
 - `PORDIE_SCOPE=global|project` (optional) forces export scope regardless of onboarding value
 - `STICKMAN_DB_PATH` (optional) overrides local SQLite path (default: `./.state/stickman.db`)
-- `TERMINAL_PTY_ENABLED=true` enables experimental PTY endpoint surface (default is guarded command terminal only)
-- `TERMINAL_PTY_BACKEND=pipe|node_pty` selects interactive terminal backend when enabled (default: `pipe`, `node_pty` requires `node-pty` and may only work under Node)
 - `X_NOTIFY` defaults to enabled when unset
 - Local secret import is explicit one-shot permission only (`allowLocalSecretsRead=true`)
 - X operations may still require interactive challenge/2FA/human verification depending on account state
@@ -202,6 +198,8 @@ Optional overrides:
 
 ## Main API Endpoints
 
+Primary UI surface in this release is social + X only.
+
 - `GET /api/health`
 - `GET /api/providers/status`
 - `POST /api/providers/mode`
@@ -257,6 +255,7 @@ Optional overrides:
 - `POST /api/integrations/subscriptions/:id/test`
 - `DELETE /api/integrations/subscriptions/:id`
 - `GET /api/integrations/bridge/status`
+- Internal/non-primary endpoints retained for backend compatibility (UI-hidden in social mode):
 - `GET /api/code/status`
 - `GET /api/code/sessions`
 - `GET /api/code/sessions/:id`

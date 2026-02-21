@@ -7,3 +7,5 @@ x-local/.venv/
 .state/
 .pordie/
 native/apple/.build/
+.DS_Store
+**/.DS_Store

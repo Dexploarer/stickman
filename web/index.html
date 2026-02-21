@@ -10,7 +10,6 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -90,31 +89,7 @@
               </section>
             </div>
 
-            <h3>3) Code Workspace Extension</h3>
-            <div class="split">
-              <section>
-                <div class="toggle-row">
-                  <label><input id="onb-code-extension-enabled" type="checkbox" checked /> enable code-workspace extension</label>
-                </div>
-                <label>Code extension mode</label>
-                <select id="onb-code-extension-mode">
-                  <option value="manual">manual</option>
-                  <option value="scheduled">scheduled</option>
-                </select>
-              </section>
-              <section>
-                <div class="toggle-row">
-                  <label><input id="onb-code-approval-write" type="checkbox" checked /> require approval for write commands</label>
-                </div>
-                <div class="toggle-row">
-                  <label><input id="onb-code-readonly-auto" type="checkbox" checked /> allow read-only autonomous commands</label>
-                </div>
-                <label>Workspace directory (optional)</label>
-                <input id="onb-code-working-dir" type="text" placeholder="/Users/home/milady-social-suite" />
-              </section>
-            </div>
-
-            <h3>4) Model Defaults and Fallbacks (All Optional)</h3>
+            <h3>3) Model Defaults and Fallbacks (All Optional)</h3>
             <div class="grid-4">
               <div class="sub-panel">
                 <label>Text small</label>
@@ -150,7 +125,7 @@
               </div>
             </div>
 
-            <h3>5) Agent Persona</h3>
+            <h3>4) Agent Persona</h3>
             <div class="split">
               <section>
                 <label>Style prompt</label>
@@ -178,7 +153,7 @@
             </div>
             <pre id="onb-persona-output"></pre>
 
-            <h3>6) Local Key Import (Explicit Permission)</h3>
+            <h3>5) Local Key Import (Explicit Permission)</h3>
             <div class="split">
               <section>
                 <div class="toggle-row">
@@ -217,7 +192,7 @@
             </div>
             <pre id="onb-import-output"></pre>
 
-            <h3>7) Prompt or Die Config Export</h3>
+            <h3>6) Prompt or Die Config Export</h3>
             <div class="split">
               <section>
                 <div class="toggle-row">
@@ -250,7 +225,7 @@
             </div>
             <pre id="onb-pordie-output"></pre>
 
-            <h3>8) Autonomy Guardrails</h3>
+            <h3>7) Autonomy Guardrails</h3>
             <div class="split">
               <section>
                 <div class="toggle-row">
@@ -269,20 +244,17 @@
               </section>
             </div>
 
-            <h3>9) Agent Skills + Mac Control + Watch</h3>
+            <h3>8) Agent Skills + Mac Control + Watch</h3>
             <div class="split">
               <section>
                 <label>App allowlist</label>
                 <div class="toggle-row">
                   <label><input id="onb-app-antigravity" type="checkbox" checked /> Antigravity</label>
-                  <label><input id="onb-app-terminal" type="checkbox" checked /> Terminal</label>
                   <label><input id="onb-app-chrome" type="checkbox" checked /> Chrome</label>
                 </div>
                 <label>Require approval categories</label>
                 <div class="toggle-row">
                   <label><input id="onb-approval-app-launch" type="checkbox" /> app_launch</label>
-                  <label><input id="onb-approval-terminal-exec" type="checkbox" checked /> terminal_exec</label>
-                  <label><input id="onb-approval-codex-exec" type="checkbox" checked /> codex_exec</label>
                   <label><input id="onb-approval-browser-external" type="checkbox" checked /> browser_external</label>
                   <label><input id="onb-approval-write-command" type="checkbox" checked /> write_command</label>
                 </div>
@@ -357,9 +329,7 @@
             <div class="button-row">
               <button class="ghost" type="button" id="integrations-refresh">Refresh Integrations</button>
               <button class="ghost" type="button" id="integration-open-antigravity">Open Antigravity</button>
-              <button class="ghost" type="button" id="integration-open-terminal">Open Terminal</button>
               <button class="ghost" type="button" id="integration-open-chrome">Open Chrome</button>
-              <button class="ghost" type="button" id="integration-claude-login">Claude Login Handoff</button>
             </div>
             <div id="integration-badges" class="integration-badges"></div>
             <pre id="integrations-output"></pre>
@@ -404,8 +374,6 @@
             <div class="button-row">
               <button class="ghost" type="button" id="ext-x-enable">Enable X Extension</button>
               <button class="ghost" type="button" id="ext-x-disable">Disable X Extension</button>
-              <button class="ghost" type="button" id="ext-code-enable">Enable Code Extension</button>
-              <button class="ghost" type="button" id="ext-code-disable">Disable Code Extension</button>
               <button class="ghost" type="button" id="ext-refresh">Refresh Extensions</button>
             </div>
             <pre id="extensions-output"></pre>
@@ -570,13 +538,12 @@
                   <button class="ghost cowork-command-btn" type="button" data-cowork-command="/new">/new</button>
                   <button class="ghost cowork-command-btn" type="button" data-cowork-command="/compact">/compact</button>
                   <button class="ghost cowork-command-btn" type="button" data-cowork-command="/watch">/watch</button>
-                  <button class="ghost cowork-command-btn" type="button" data-cowork-command="/terminal ">/terminal</button>
                 </div>
                 <div id="cowork-metrics" class="cowork-metrics"></div>
                 <div id="cowork-chat-log" class="cowork-chat-log"></div>
                 <form id="cowork-form">
                   <label>Task for Agent</label>
-                  <textarea id="cowork-task-input" rows="4" placeholder="Ask directly, or use slash commands (/status, /terminal <cmd>, /watch)." required></textarea>
+                  <textarea id="cowork-task-input" rows="4" placeholder="Ask directly, or use slash commands (/status, /watch)." required></textarea>
                   <div class="toggle-row">
                     <label><input id="cowork-auto-plan" type="checkbox" checked /> also generate automation plan</label>
                     <label><input id="cowork-start-task" type="checkbox" checked /> queue as background task</label>
@@ -594,20 +561,17 @@
                   <p class="summary">Launch core agent actions with one click while keeping approval controls intact.</p>
                   <label>Quick URL (for browser action)</label>
                   <input id="cowork-quick-url" type="text" placeholder="https://x.com/home" />
-                  <label>Quick Prompt (for Codex/Claude actions)</label>
-                  <input id="cowork-quick-prompt" type="text" placeholder="Review this repo and propose next coding steps." />
+                  <label>Quick Prompt (for social mission/context)</label>
+                  <input id="cowork-quick-prompt" type="text" placeholder="Draft social strategy for today." />
                   <div class="button-grid cowork-quick-grid">
                     <button class="ghost" type="button" id="cowork-quick-antigravity">Open Antigravity</button>
-                    <button class="ghost" type="button" id="cowork-quick-terminal">Open Terminal</button>
                     <button class="ghost" type="button" id="cowork-quick-chrome">Open Chrome</button>
-                    <button class="ghost" type="button" id="cowork-quick-codex">Run Codex</button>
-                    <button class="ghost" type="button" id="cowork-quick-claude">Run Claude</button>
                   </div>
                 </div>
 
                 <div class="sub-panel">
                   <h3>Mission Templates</h3>
-                  <p class="summary">Create full social/coding mission chains in one click.</p>
+                  <p class="summary">Create social mission chains in one click.</p>
                   <label>Mission Template</label>
                   <select id="cowork-mission-select"></select>
                   <label>Prompt override (optional)</label>
@@ -617,7 +581,6 @@
                   <div class="button-row">
                     <button class="ghost" type="button" id="cowork-mission-run">Run Selected Mission</button>
                     <button class="ghost" type="button" id="cowork-mission-social">Run Social Mission</button>
-                    <button class="ghost" type="button" id="cowork-mission-coding">Run Coding Mission</button>
                   </div>
                 </div>
 
@@ -645,149 +608,6 @@
                   <pre id="cowork-log-output"></pre>
                 </div>
 
-                <div class="sub-panel">
-                  <h3>Coding Ops</h3>
-                  <p class="summary">Read-only commands can run immediately. Write commands are approval-gated.</p>
-                  <form id="code-plan-form">
-                    <label>Coding task</label>
-                    <textarea id="code-plan-task" rows="3" placeholder="Refactor provider switching to reduce duplicated route logic." required></textarea>
-                    <button type="submit">Generate Coding Plan</button>
-                  </form>
-                  <pre id="code-plan-output"></pre>
-
-                  <form id="code-exec-form">
-                    <label>Workspace command</label>
-                    <input id="code-exec-command" type="text" placeholder="rg -n &quot;provider mode&quot; src" required />
-                    <label>Working directory (optional)</label>
-                    <input id="code-exec-cwd" type="text" placeholder="src" />
-                    <button type="submit">Run Command</button>
-                  </form>
-                  <pre id="code-exec-output"></pre>
-
-                  <label>Code approval ID</label>
-                  <input id="code-approval-id" type="text" placeholder="paste code approval id" />
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="code-status-refresh">Refresh Code Status</button>
-                    <button class="ghost" type="button" id="code-approvals-refresh">Refresh Code Approvals</button>
-                    <button class="ghost" type="button" id="code-approval-approve">Approve Code Command</button>
-                    <button class="ghost" type="button" id="code-approval-reject">Reject Code Command</button>
-                  </div>
-                  <pre id="code-status-output"></pre>
-                  <pre id="code-approvals-output"></pre>
-                </div>
-
-                <div class="sub-panel terminal-panel">
-                  <h3>Embedded Terminal</h3>
-                  <p class="summary">Run guarded workspace commands and inspect live session output without leaving the app.</p>
-                  <label>Session</label>
-                  <select id="terminal-session-select">
-                    <option value="">latest session</option>
-                  </select>
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="terminal-refresh">Refresh Sessions</button>
-                    <button class="ghost" type="button" id="terminal-load">Load Session Output</button>
-                    <button class="ghost" type="button" id="terminal-clear">Clear Output</button>
-                  </div>
-                  <form id="terminal-form">
-                    <label>Command</label>
-                    <input id="terminal-command" type="text" placeholder="rg -n &quot;integration_action&quot; src/server.ts" required />
-                    <label>Working directory (optional)</label>
-                    <input id="terminal-cwd" type="text" placeholder="src" />
-                    <button type="submit">Run in Terminal</button>
-                  </form>
-                  <pre id="terminal-output"></pre>
-                </div>
-
-                <div class="sub-panel">
-                  <h3>Workspace Editor</h3>
-                  <p class="summary">Browse, open, and guarded-save text files inside this workspace.</p>
-                  <label>Directory</label>
-                  <input id="workspace-tree-path" type="text" placeholder="src" value="src" />
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="workspace-tree-refresh">List Files</button>
-                    <button class="ghost" type="button" id="workspace-tree-up">Up</button>
-                  </div>
-                  <div id="workspace-tree" class="workspace-tree"></div>
-                  <label>File path</label>
-                  <input id="workspace-file-path" type="text" placeholder="src/server.ts" />
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="workspace-file-load">Load</button>
-                    <button class="ghost" type="button" id="workspace-file-dryrun">Dry-run Save</button>
-                    <button class="ghost" type="button" id="workspace-file-save">Execute Save</button>
-                  </div>
-                  <textarea id="workspace-file-content" rows="14" placeholder="file contents..."></textarea>
-                  <pre id="workspace-file-output"></pre>
-                </div>
-
-                <div class="sub-panel">
-                  <h3>Git Control Plane</h3>
-                  <p class="summary">Inspect status/diff/log and run guarded branch/commit/push flows.</p>
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="git-refresh">Refresh Git Status</button>
-                    <button class="ghost" type="button" id="git-log">Load Log</button>
-                  </div>
-                  <pre id="git-status-output"></pre>
-                  <label>Diff path filter (optional)</label>
-                  <input id="git-diff-path" type="text" placeholder="src/server.ts" />
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="git-diff-unstaged">Show Unstaged Diff</button>
-                    <button class="ghost" type="button" id="git-diff-staged">Show Staged Diff</button>
-                  </div>
-                  <pre id="git-diff-output"></pre>
-
-                  <h4>Guarded Actions (dry-run then execute)</h4>
-                  <label>New branch name</label>
-                  <input id="git-branch-name" type="text" placeholder="codex/dev-workbench-v1" />
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="git-branch-dryrun">Dry-run Branch</button>
-                    <button class="ghost" type="button" id="git-branch-exec">Execute Branch</button>
-                  </div>
-                  <label>Commit message</label>
-                  <input id="git-commit-message" type="text" placeholder="feat: add workbench controls" />
-                  <div class="toggle-row">
-                    <label><input id="git-commit-addall" type="checkbox" checked /> add -A</label>
-                  </div>
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="git-commit-dryrun">Dry-run Commit</button>
-                    <button class="ghost" type="button" id="git-commit-exec">Execute Commit</button>
-                  </div>
-                  <div class="toggle-row">
-                    <label><input id="git-push-upstream" type="checkbox" checked /> push -u origin</label>
-                  </div>
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="git-push-dryrun">Dry-run Push</button>
-                    <button class="ghost" type="button" id="git-push-exec">Execute Push</button>
-                  </div>
-                  <pre id="git-action-output"></pre>
-                </div>
-
-                <div class="sub-panel terminal-pty-panel">
-                  <h3>Interactive Terminal</h3>
-                  <p class="summary">Feature-flagged. Enable by setting TERMINAL_PTY_ENABLED=true. Runs with local user permissions.</p>
-                  <label>Working directory (optional)</label>
-                  <input id="terminal-pty-cwd" type="text" placeholder="." />
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="terminal-pty-create">Create Session</button>
-                    <button class="ghost" type="button" id="terminal-pty-refresh">Refresh Sessions</button>
-                    <button class="ghost" type="button" id="terminal-pty-close">Close Session</button>
-                  </div>
-                  <label>Session</label>
-                  <select id="terminal-pty-session-select">
-                    <option value="">select session</option>
-                  </select>
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="terminal-pty-connect">Connect Stream</button>
-                    <button class="ghost" type="button" id="terminal-pty-disconnect">Disconnect</button>
-                  </div>
-                  <label>Input</label>
-                  <input id="terminal-pty-input" type="text" placeholder="echo hello" />
-                  <div class="button-row">
-                    <button class="ghost" type="button" id="terminal-pty-send">Send</button>
-                    <button class="ghost" type="button" id="terminal-pty-sendline">Send Line</button>
-                  </div>
-                  <div id="terminal-pty-xterm" class="terminal-xterm"></div>
-                  <pre id="terminal-pty-output"></pre>
-                </div>
               </section>
               <section class="cowork-lane">
                 <h3>Live Agent Observer</h3>
@@ -979,8 +799,6 @@
       </section>
     </main>
 
-    <script src="/vendor/xterm/lib/xterm.js"></script>
-    <script src="/vendor/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

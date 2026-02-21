@@ -8,7 +8,6 @@ const DASHBOARD_MAX_CUSTOM_PANELS = 16;
 const DASHBOARD_PANEL_SIZE_ORDER = ["auto", "wide", "tall", "large"];
 const DASHBOARD_PAGE_TABS = [
   { id: "operations", label: "Operations" },
-  { id: "workspace", label: "Workspace" },
   { id: "studio", label: "Studio" },
   { id: "all", label: "All Pages" },
 ];
@@ -23,9 +22,9 @@ const DASHBOARD_PANEL_META_BY_TITLE = {
   "Recent Runs": { page: "operations", segment: "panel" },
   "Approval Queue": { page: "operations", segment: "panel" },
   "Skill Center": { page: "operations", segment: "tool" },
-  "Task Board": { page: "workspace", segment: "panel" },
+  "Task Board": { page: "operations", segment: "panel" },
   "Mac Allowlist + Watch": { page: "operations", segment: "panel" },
-  "Agentic Co-Workspace": { page: "workspace", segment: "panel" },
+  "Agentic Co-Workspace": { page: "operations", segment: "panel" },
   "Login Refresh": { page: "studio", segment: "tool" },
   "Command Studio": { page: "operations", segment: "tool" },
   "AI Workflow Planner": { page: "studio", segment: "tool" },
@@ -47,8 +46,6 @@ const state = {
   autonomy: null,
   approvals: [],
   coworkMessages: [],
-  codeStatus: null,
-  codeApprovals: [],
   skills: [],
   tasks: [],
   coworkState: null,
@@ -62,19 +59,6 @@ const state = {
   integrationActionHistory: [],
   integrationSubscribers: [],
   integrationBridgeStatus: null,
-  terminalSessions: [],
-  terminalActiveSessionId: "",
-  workspaceTreeEntries: [],
-  workspaceFileSha256: "",
-  workspaceFileConfirmToken: "",
-  gitStatus: null,
-  gitConfirmTokens: {
-    create_branch: "",
-    commit: "",
-    push: "",
-  },
-  terminalPtySessions: [],
-  terminalPtyActiveSessionId: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -1324,11 +1308,6 @@ const renderIntegrationBadges = () => {
   const readiness = state.integrations?.readiness || {};
   const rows = [
     {
-      label: "coding-agent",
-      value: Boolean(readiness.codingAgentReady),
-      text: readiness.codingAgentReady ? "ready" : "blocked",
-    },
-    {
       label: "social-agent",
       value: Boolean(readiness.socialAgentReady),
       text: readiness.socialAgentReady ? "ready" : "blocked",
@@ -1337,16 +1316,6 @@ const renderIntegrationBadges = () => {
       label: "watch",
       value: Boolean(readiness.watchReady),
       text: readiness.watchReady ? "ready" : "blocked",
-    },
-    {
-      label: "claude-session",
-      value: Boolean(state.integrations?.claude?.sessionDetected),
-      text: state.integrations?.claude?.sessionDetected ? "detected" : "missing",
-    },
-    {
-      label: "codex",
-      value: Boolean(state.integrations?.codex?.available),
-      text: state.integrations?.codex?.available ? "available" : "missing",
     },
     {
       label: "livekit",
@@ -1490,607 +1459,6 @@ const refreshApprovals = async () => {
   return result;
 };
 
-const refreshCodeStatus = async () => {
-  const result = await apiGet("/api/code/status");
-  state.codeStatus = result || null;
-  setText("code-status-output", result);
-  return result;
-};
-
-const refreshTerminalSessions = async () => {
-  const result = await apiGet("/api/code/sessions");
-  state.terminalSessions = Array.isArray(result?.sessions) ? result.sessions : [];
-  const select = $("terminal-session-select");
-  if (select) {
-    const current = state.terminalActiveSessionId || select.value;
-    select.innerHTML = "";
-    const fallback = document.createElement("option");
-    fallback.value = "";
-    fallback.textContent = "latest session";
-    select.appendChild(fallback);
-    state.terminalSessions.slice(0, 60).forEach((session) => {
-      const option = document.createElement("option");
-      option.value = session.id;
-      option.textContent = `${session.id} • ${session.status} • ${session.command}`;
-      select.appendChild(option);
-    });
-    if (current && state.terminalSessions.some((session) => session.id === current)) {
-      select.value = current;
-      state.terminalActiveSessionId = current;
-    } else if (state.terminalSessions[0]) {
-      select.value = state.terminalSessions[0].id;
-      state.terminalActiveSessionId = state.terminalSessions[0].id;
-    } else {
-      select.value = "";
-      state.terminalActiveSessionId = "";
-    }
-  }
-  return result;
-};
-
-const loadTerminalSession = async (sessionIdRaw) => {
-  const sessionId = String(sessionIdRaw || "").trim() || state.terminalSessions[0]?.id || "";
-  if (!sessionId) {
-    setText("terminal-output", "No terminal session found yet.");
-    return null;
-  }
-  const result = await apiGet(`/api/code/sessions/${encodeURIComponent(sessionId)}`);
-  state.terminalActiveSessionId = sessionId;
-  const session = result?.session || null;
-  const lines = [];
-  if (session) {
-    lines.push(`$ ${session.command}`);
-    lines.push("");
-    if (session.stdout) {
-      lines.push(String(session.stdout));
-    }
-    if (session.stderr) {
-      if (session.stdout) {
-        lines.push("");
-      }
-      lines.push("[stderr]");
-      lines.push(String(session.stderr));
-    }
-    lines.push("");
-    lines.push(`[status=${session.status} exit=${session.exitCode} cwd=${session.cwd}]`);
-  }
-  setText("terminal-output", {
-    ok: result?.ok,
-    sessionId,
-    output: lines.join("\n"),
-  });
-  return result;
-};
-
-const runEmbeddedTerminalCommand = async (command, cwd) => {
-  const result = await apiPost("/api/code/exec", {
-    command,
-    cwd: cwd || undefined,
-  });
-  setText("terminal-output", result);
-  await refreshCodeStatus();
-  await refreshCodeApprovals();
-  await refreshTerminalSessions();
-  const sessionId = result?.session?.id || state.terminalSessions[0]?.id || "";
-  if (sessionId) {
-    await loadTerminalSession(sessionId);
-  }
-  return result;
-};
-
-const normalizeWorkbenchRelPath = (raw) => {
-  const trimmed = String(raw || "").trim();
-  if (!trimmed) {
-    return "";
-  }
-  const withSlashes = trimmed.replace(/\\/g, "/");
-  const noLeading = withSlashes.replace(/^\/+/, "");
-  const noTrailing = noLeading.replace(/\/+$/, "");
-  if (noTrailing === "." || noTrailing === "./") {
-    return "";
-  }
-  return noTrailing;
-};
-
-const parentWorkbenchRelDir = (relDirRaw) => {
-  const relDir = normalizeWorkbenchRelPath(relDirRaw);
-  if (!relDir) {
-    return "";
-  }
-  const parts = relDir.split("/").filter(Boolean);
-  parts.pop();
-  return parts.join("/");
-};
-
-const refreshWorkspaceTree = async () => {
-  const relDir = normalizeWorkbenchRelPath($("workspace-tree-path")?.value || "");
-  const result = await apiGet(`/api/workspace/tree?path=${encodeURIComponent(relDir)}`);
-  state.workspaceTreeEntries = Array.isArray(result?.entries) ? result.entries : [];
-  renderWorkspaceTree();
-  setText("workspace-file-output", result);
-  return result;
-};
-
-const renderWorkspaceTree = () => {
-  const container = $("workspace-tree");
-  if (!container) {
-    return;
-  }
-  container.innerHTML = "";
-  const entries = Array.isArray(state.workspaceTreeEntries) ? state.workspaceTreeEntries : [];
-  if (!entries.length) {
-    const empty = document.createElement("div");
-    empty.className = "history-item";
-    empty.textContent = "No entries found.";
-    container.appendChild(empty);
-    return;
-  }
-  entries.forEach((entry) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "ghost";
-    button.dataset.workspacePath = entry.relPath;
-    button.dataset.workspaceType = entry.type;
-    const prefix = entry.type === "dir" ? "[dir]" : "[file]";
-    button.textContent = `${prefix} ${entry.name}`;
-    container.appendChild(button);
-  });
-};
-
-const loadWorkspaceFile = async (relPathRaw) => {
-  const relPath = normalizeWorkbenchRelPath(relPathRaw || $("workspace-file-path")?.value || "");
-  if (!relPath) {
-    throw new Error("File path is required.");
-  }
-  if ($("workspace-file-path")) {
-    $("workspace-file-path").value = relPath;
-  }
-  const result = await apiGet(`/api/workspace/file?path=${encodeURIComponent(relPath)}`);
-  if ($("workspace-file-content")) {
-    $("workspace-file-content").value = String(result?.content || "");
-  }
-  state.workspaceFileSha256 = String(result?.sha256 || "");
-  state.workspaceFileConfirmToken = "";
-  setText("workspace-file-output", result);
-  return result;
-};
-
-const dryRunWorkspaceSave = async () => {
-  const relPath = normalizeWorkbenchRelPath($("workspace-file-path")?.value || "");
-  if (!relPath) {
-    throw new Error("File path is required.");
-  }
-  const content = $("workspace-file-content")?.value || "";
-  const baseSha256 = String(state.workspaceFileSha256 || "").trim();
-  const result = await apiPost("/api/workspace/file", {
-    mode: "dry_run",
-    path: relPath,
-    content,
-    baseSha256,
-  });
-  state.workspaceFileConfirmToken = String(result?.confirmToken || "");
-  setText("workspace-file-output", result);
-  return result;
-};
-
-const executeWorkspaceSave = async () => {
-  const relPath = normalizeWorkbenchRelPath($("workspace-file-path")?.value || "");
-  if (!relPath) {
-    throw new Error("File path is required.");
-  }
-  const content = $("workspace-file-content")?.value || "";
-  const baseSha256 = String(state.workspaceFileSha256 || "").trim();
-  const confirmToken = String(state.workspaceFileConfirmToken || "").trim();
-  if (!confirmToken) {
-    throw new Error("Missing confirm token. Run Dry-run Save first.");
-  }
-  const result = await apiPost("/api/workspace/file", {
-    mode: "execute",
-    path: relPath,
-    content,
-    baseSha256,
-    confirmToken,
-  });
-  state.workspaceFileSha256 = String(result?.result?.sha256 || state.workspaceFileSha256 || "");
-  state.workspaceFileConfirmToken = "";
-  setText("workspace-file-output", result);
-  return result;
-};
-
-const refreshGitStatus = async () => {
-  const result = await apiGet("/api/git/status");
-  state.gitStatus = result || null;
-  setText("git-status-output", result);
-  return result;
-};
-
-const refreshGitLog = async () => {
-  const result = await apiGet("/api/git/log?limit=50");
-  setText("git-action-output", result);
-  return result;
-};
-
-const refreshGitDiff = async (staged, pathRaw) => {
-  const relPath = normalizeWorkbenchRelPath(pathRaw || $("git-diff-path")?.value || "");
-  const query = new URLSearchParams();
-  query.set("staged", staged ? "1" : "0");
-  if (relPath) {
-    query.set("path", relPath);
-  }
-  const result = await apiGet(`/api/git/diff?${query.toString()}`);
-  setText("git-diff-output", result);
-  return result;
-};
-
-const collectGitActionParams = (action) => {
-  if (action === "create_branch") {
-    const name = ($("git-branch-name")?.value || "").trim();
-    return { name, checkout: true };
-  }
-  if (action === "commit") {
-    const message = ($("git-commit-message")?.value || "").trim();
-    const addAll = Boolean($("git-commit-addall")?.checked);
-    return { message, addAll };
-  }
-  if (action === "push") {
-    const setUpstream = Boolean($("git-push-upstream")?.checked);
-    return { remote: "origin", setUpstream };
-  }
-  return {};
-};
-
-const dryRunGitAction = async (action) => {
-  const params = collectGitActionParams(action);
-  const result = await apiPost("/api/git/actions", {
-    mode: "dry_run",
-    action,
-    params,
-  });
-  state.gitConfirmTokens[action] = String(result?.confirmToken || "");
-  setText("git-action-output", result);
-  await refreshGitStatus();
-  return result;
-};
-
-const executeGitAction = async (action) => {
-  const params = collectGitActionParams(action);
-  const confirmToken = String(state.gitConfirmTokens[action] || "").trim();
-  if (!confirmToken) {
-    throw new Error("Missing confirm token. Run dry-run first.");
-  }
-  const result = await apiPost("/api/git/actions", {
-    mode: "execute",
-    action,
-    params,
-    confirmToken,
-  });
-  state.gitConfirmTokens[action] = "";
-  setText("git-action-output", result);
-  await refreshGitStatus();
-  return result;
-};
-
-  let terminalPtyWs = null;
-  let terminalPtyXterm = null;
-  let terminalPtyFitAddon = null;
-  let terminalPtyResizeTimer = null;
-  let terminalPtyPendingInput = "";
-  let terminalPtyInputTimer = null;
-
-  const stripAnsiCodes = (value) => String(value || "").replace(/\u001b\[[0-9;]*m/g, "");
-
-  const isTerminalPtyXtermAvailable = () =>
-    typeof window !== "undefined" &&
-    typeof window.Terminal === "function" &&
-    window.FitAddon &&
-    typeof window.FitAddon.FitAddon === "function";
-
-  const scheduleTerminalPtyResizeSync = () => {
-    if (!terminalPtyXterm || !terminalPtyFitAddon) {
-      return;
-    }
-    const sessionId = readTerminalPtySessionId();
-    if (!sessionId) {
-      return;
-    }
-    if (terminalPtyResizeTimer) {
-      return;
-    }
-    terminalPtyResizeTimer = setTimeout(async () => {
-      terminalPtyResizeTimer = null;
-      try {
-        terminalPtyFitAddon.fit();
-      } catch {
-        // ignore
-      }
-      try {
-        await apiPost(`/api/terminal/sessions/${encodeURIComponent(sessionId)}/resize`, {
-          cols: terminalPtyXterm.cols,
-          rows: terminalPtyXterm.rows,
-        });
-      } catch {
-        // ignore
-      }
-    }, 80);
-  };
-
-  const ensureTerminalPtyXterm = () => {
-    const mount = $("terminal-pty-xterm");
-    if (!mount || !isTerminalPtyXtermAvailable()) {
-      return null;
-    }
-    if (terminalPtyXterm) {
-      return terminalPtyXterm;
-    }
-
-    const term = new window.Terminal({
-      cursorBlink: true,
-      convertEol: true,
-      scrollback: 5000,
-      fontFamily:
-        '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-      fontSize: 12,
-      theme: {
-        background: "#0f2421",
-        foreground: "#dcf5f1",
-        cursor: "#dcf5f1",
-        selectionBackground: "rgba(220,245,241,0.2)",
-      },
-    });
-    const fitAddon = new window.FitAddon.FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(mount);
-    fitAddon.fit();
-
-    const panel = mount.closest(".terminal-pty-panel");
-    if (panel) {
-      panel.classList.add("xterm-active");
-    }
-
-    term.onData((data) => {
-      terminalPtyPendingInput += String(data || "");
-      if (terminalPtyInputTimer) {
-        return;
-      }
-      terminalPtyInputTimer = setTimeout(async () => {
-        terminalPtyInputTimer = null;
-        const payload = terminalPtyPendingInput;
-        terminalPtyPendingInput = "";
-        if (!payload) {
-          return;
-        }
-        const sessionId = readTerminalPtySessionId();
-        if (!sessionId) {
-          return;
-        }
-        try {
-          await apiPost(`/api/terminal/sessions/${encodeURIComponent(sessionId)}/input`, {
-            data: payload,
-          });
-        } catch {
-          // ignore
-        }
-      }, 35);
-    });
-
-    window.addEventListener("resize", () => scheduleTerminalPtyResizeSync());
-
-    terminalPtyXterm = term;
-    terminalPtyFitAddon = fitAddon;
-    return term;
-  };
-
-  const setTerminalPtyOutput = (buffer) => {
-    const raw = String(buffer || "");
-    const pre = $("terminal-pty-output");
-    if (pre) {
-      const text = stripAnsiCodes(raw);
-      pre.textContent = text.slice(Math.max(0, text.length - 200_000));
-      pre.scrollTop = pre.scrollHeight;
-    }
-    const term = ensureTerminalPtyXterm();
-    if (term) {
-      term.reset();
-      term.write(raw);
-      try {
-        terminalPtyFitAddon.fit();
-      } catch {
-        // ignore
-      }
-      scheduleTerminalPtyResizeSync();
-      term.focus();
-    }
-  };
-
-  const appendTerminalPtyOutput = (chunk) => {
-    const node = $("terminal-pty-output");
-    const raw = String(chunk || "");
-
-    if (terminalPtyXterm) {
-      terminalPtyXterm.write(raw);
-    }
-
-    if (node) {
-      const sanitized = stripAnsiCodes(raw);
-      const next = `${node.textContent || ""}${sanitized}`;
-      node.textContent = next.slice(Math.max(0, next.length - 200_000));
-      node.scrollTop = node.scrollHeight;
-    }
-  };
-
-  const refreshTerminalPtySessions = async () => {
-    const result = await apiGet("/api/terminal/sessions");
-    state.terminalPtySessions = Array.isArray(result?.sessions) ? result.sessions : [];
-  const select = $("terminal-pty-session-select");
-  if (select) {
-    const current = state.terminalPtyActiveSessionId || select.value;
-    select.innerHTML = "";
-    const fallback = document.createElement("option");
-    fallback.value = "";
-      fallback.textContent = "select session";
-      select.appendChild(fallback);
-      state.terminalPtySessions.slice(0, 50).forEach((session) => {
-        const option = document.createElement("option");
-        option.value = session.id;
-        const backend = session.backend ? ` • ${session.backend}` : "";
-        option.textContent = `${session.id}${backend} • ${session.status} • ${session.cwd}`;
-        select.appendChild(option);
-      });
-      if (current && state.terminalPtySessions.some((session) => session.id === current)) {
-        select.value = current;
-        state.terminalPtyActiveSessionId = current;
-    } else if (state.terminalPtySessions[0]) {
-      select.value = state.terminalPtySessions[0].id;
-      state.terminalPtyActiveSessionId = state.terminalPtySessions[0].id;
-    } else {
-      select.value = "";
-      state.terminalPtyActiveSessionId = "";
-    }
-  }
-    if (result?.ok === false) {
-      appendTerminalPtyOutput(`\n[error] ${result.error || result.code || "terminal_pty_error"}\n`);
-    }
-    return result;
-  };
-
-const readTerminalPtySessionId = () => {
-  const selected = ($("terminal-pty-session-select")?.value || "").trim();
-  if (selected) {
-    return selected;
-  }
-  return String(state.terminalPtyActiveSessionId || "").trim();
-};
-
-  const connectTerminalPtyWs = () => {
-    const sessionId = readTerminalPtySessionId();
-    if (!sessionId) {
-      appendTerminalPtyOutput("\n[error] select a terminal session first.\n");
-      return;
-  }
-  if (terminalPtyWs) {
-    try {
-      terminalPtyWs.close();
-    } catch {
-      // ignore
-    }
-    terminalPtyWs = null;
-  }
-  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-  const url = `${scheme}://${window.location.host}/api/terminal/ws?sessionId=${encodeURIComponent(sessionId)}`;
-  const ws = new WebSocket(url);
-    terminalPtyWs = ws;
-    ensureTerminalPtyXterm();
-    appendTerminalPtyOutput(`\n[connect] ${sessionId}\n`);
-    ws.addEventListener("message", (event) => {
-      const raw = typeof event.data === "string" ? event.data : "";
-      const parsed = parseMaybeJSON(raw);
-      if (!parsed || typeof parsed !== "object") {
-      appendTerminalPtyOutput(raw);
-      return;
-    }
-      const type = parsed.type;
-      const payload = parsed.payload || {};
-      if (type === "terminal_bootstrap") {
-        if (typeof payload.buffer === "string" && payload.buffer) {
-          setTerminalPtyOutput(payload.buffer);
-        }
-        return;
-      }
-      if (type === "terminal_output") {
-        if (typeof payload.chunk === "string") {
-          appendTerminalPtyOutput(payload.chunk);
-        }
-        scheduleTerminalPtyResizeSync();
-        return;
-      }
-      if (type === "terminal_exit") {
-        appendTerminalPtyOutput(`\n[exit] ${payload.exitCode}\n`);
-      }
-    });
-  ws.addEventListener("close", () => {
-    appendTerminalPtyOutput("\n[disconnect]\n");
-  });
-  ws.addEventListener("error", () => {
-    appendTerminalPtyOutput("\n[ws_error]\n");
-  });
-};
-
-const disconnectTerminalPtyWs = () => {
-  if (!terminalPtyWs) {
-    return;
-  }
-  try {
-    terminalPtyWs.close();
-  } catch {
-    // ignore
-  }
-  terminalPtyWs = null;
-};
-
-  const createTerminalPtySession = async () => {
-    const cwd = ($("terminal-pty-cwd")?.value || "").trim();
-    const term = ensureTerminalPtyXterm();
-    if (term) {
-      try {
-        terminalPtyFitAddon.fit();
-      } catch {
-        // ignore
-      }
-    }
-    const result = await apiPost("/api/terminal/sessions", {
-      cwd: cwd || undefined,
-      cols: term ? term.cols : undefined,
-      rows: term ? term.rows : undefined,
-    });
-    if (result?.session?.id) {
-      state.terminalPtyActiveSessionId = result.session.id;
-    }
-  await refreshTerminalPtySessions();
-  appendTerminalPtyOutput(`\n[created] ${result?.session?.id || "unknown"}\n`);
-  return result;
-};
-
-const closeTerminalPtySession = async () => {
-  const sessionId = readTerminalPtySessionId();
-  if (!sessionId) {
-    throw new Error("Select a terminal session first.");
-  }
-  if (state.terminalPtyActiveSessionId === sessionId) {
-    disconnectTerminalPtyWs();
-  }
-  const result = await apiPost(`/api/terminal/sessions/${encodeURIComponent(sessionId)}/close`, {});
-  await refreshTerminalPtySessions();
-  appendTerminalPtyOutput(`\n[closed] ${sessionId}\n`);
-  return result;
-};
-
-const sendTerminalPtyInput = async (withNewline) => {
-  const sessionId = readTerminalPtySessionId();
-  if (!sessionId) {
-    throw new Error("Select a terminal session first.");
-  }
-  const input = $("terminal-pty-input");
-  const raw = String(input?.value || "");
-  if (!raw.trim()) {
-    return null;
-  }
-  const data = withNewline ? `${raw}\n` : raw;
-  const result = await apiPost(`/api/terminal/sessions/${encodeURIComponent(sessionId)}/input`, {
-    data,
-  });
-  if (input) {
-    input.value = "";
-  }
-  return result;
-};
-
-const refreshCodeApprovals = async () => {
-  const result = await apiGet("/api/code/approvals");
-  state.codeApprovals = Array.isArray(result?.approvals) ? result.approvals : [];
-  setText("code-approvals-output", result);
-  return result;
-};
-
 const populateSkillSelectors = () => {
   const ids = (state.skills || []).map((item) => item.id);
   const targets = ["skill-select", "task-skill-select"];
@@ -2192,14 +1560,12 @@ const renderCoworkShellBanner = () => {
   const approvals = Number(summary.approvals?.total || 0);
   const watch = Number(summary.watch?.active || 0);
   const route = state.providerStatus?.activeRoute || state.providerStatus?.mode || "unknown";
-  const codex = state.integrations?.codex?.available ? "ready" : "missing";
-  const claude = state.integrations?.claude?.sessionDetected ? "detected" : "missing";
   const livekit = state.integrations?.livekit?.configured ? "configured" : "off";
   node.textContent = [
     "milady cowork gateway",
     `route=${route} tasks=${running}/${queued} approvals=${approvals} watch=${watch}`,
-    `codex=${codex} claude_session=${claude} livekit=${livekit}`,
-    "slash: /status /help /new /compact /watch /terminal <command> /edit <path> /git status|diff",
+    `livekit=${livekit}`,
+    "slash: /status /help /new /compact /watch",
   ].join("\n");
 };
 
@@ -2445,7 +1811,8 @@ const refreshCoworkState = async () => {
 
 const refreshCoworkMissions = async () => {
   const result = await apiGet("/api/cowork/missions");
-  state.coworkMissions = Array.isArray(result?.missions) ? result.missions : [];
+  const missions = Array.isArray(result?.missions) ? result.missions : [];
+  state.coworkMissions = missions.filter((mission) => String(mission?.lane || "").toLowerCase() === "social");
   const select = $("cowork-mission-select");
   if (select) {
     const current = select.value;
@@ -2625,7 +1992,7 @@ const runCoworkSlashCommand = async (rawInput) => {
   if (command === "/help") {
     addCoworkMessage(
       "agent",
-      "Commands: /status, /new, /reset, /compact, /watch, /terminal <command>, /edit <path>, /git status|diff, /help",
+      "Commands: /status, /new, /reset, /compact, /watch, /help",
     );
     return true;
   }
@@ -2677,72 +2044,6 @@ const runCoworkSlashCommand = async (rawInput) => {
       outputId: "watch-output",
     });
     addCoworkMessage("agent", `Watching task ${candidateTask.id} on ${sourceId}.`);
-    return true;
-  }
-
-  if (command === "/terminal") {
-    if (!args) {
-      addCoworkMessage("system", "Usage: /terminal <command>");
-      return true;
-    }
-    if ($("terminal-command")) {
-      $("terminal-command").value = args;
-    }
-    const cwd = ($("terminal-cwd")?.value || "").trim();
-    const result = await runEmbeddedTerminalCommand(args, cwd);
-    addCoworkMessage("agent", `Terminal executed: ${args} (${result?.ok ? "ok" : "failed"})`);
-    return true;
-  }
-
-  if (command === "/edit") {
-    if (!args) {
-      addCoworkMessage("system", "Usage: /edit <path>");
-      return true;
-    }
-    const relPath = normalizeWorkbenchRelPath(args);
-    if ($("workspace-file-path")) {
-      $("workspace-file-path").value = relPath;
-    }
-    if ($("workspace-tree-path")) {
-      $("workspace-tree-path").value = parentWorkbenchRelDir(relPath);
-    }
-    try {
-      await refreshWorkspaceTree();
-    } catch {
-      // ignore tree refresh errors
-    }
-    const result = await loadWorkspaceFile(relPath);
-    addCoworkMessage("agent", `Opened ${relPath} (${result?.ok ? "ok" : "failed"})`);
-    return true;
-  }
-
-  if (command === "/git") {
-    const parts = args.split(" ").map((part) => part.trim()).filter(Boolean);
-    const sub = (parts[0] || "status").toLowerCase();
-    if (sub === "status") {
-      const result = await refreshGitStatus();
-      const branch = result?.branch || "unknown";
-      const changes = result?.changes || {};
-      const stagedCount = Array.isArray(changes.staged) ? changes.staged.length : 0;
-      const unstagedCount = Array.isArray(changes.unstaged) ? changes.unstaged.length : 0;
-      const untrackedCount = Array.isArray(changes.untracked) ? changes.untracked.length : 0;
-      addCoworkMessage("agent", `git status: ${branch} staged=${stagedCount} unstaged=${unstagedCount} untracked=${untrackedCount}`);
-      return true;
-    }
-    if (sub === "diff") {
-      const mode = (parts[1] || "").toLowerCase();
-      const staged = mode === "staged";
-      const pathArg = staged ? parts.slice(2).join(" ") : parts.slice(1).join(" ");
-      if ($("git-diff-path")) {
-        $("git-diff-path").value = pathArg;
-      }
-      const result = await refreshGitDiff(staged, pathArg);
-      const diffText = typeof result?.diff === "string" ? result.diff : "";
-      const snippet = diffText.trim() ? diffText.slice(0, 2200) : "(no diff)";
-      addCoworkMessage("agent", `git diff ${staged ? "--staged" : ""} ${pathArg || ""}\n${snippet}`.trim());
-      return true;
-    }
-    addCoworkMessage("system", "Usage: /git status | /git diff [staged] [path]");
     return true;
   }
 
@@ -3249,21 +2550,6 @@ const fillOnboardingForm = () => {
   if ($("onb-x-approval-write")) {
     $("onb-x-approval-write").checked = Boolean(onboarding.extensions?.x?.approvalRequiredForWrite);
   }
-  if ($("onb-code-extension-enabled")) {
-    $("onb-code-extension-enabled").checked = Boolean(onboarding.extensions?.code?.enabled);
-  }
-  if ($("onb-code-extension-mode")) {
-    $("onb-code-extension-mode").value = onboarding.extensions?.code?.mode || "manual";
-  }
-  if ($("onb-code-approval-write")) {
-    $("onb-code-approval-write").checked = Boolean(onboarding.extensions?.code?.approvalRequiredForWrite);
-  }
-  if ($("onb-code-readonly-auto")) {
-    $("onb-code-readonly-auto").checked = Boolean(onboarding.extensions?.code?.allowReadOnlyAutonomy);
-  }
-  if ($("onb-code-working-dir")) {
-    $("onb-code-working-dir").value = onboarding.extensions?.code?.workingDirectory || "";
-  }
   if ($("onb-style-prompt")) {
     $("onb-style-prompt").value = onboarding.persona?.stylePrompt || "";
   }
@@ -3307,23 +2593,14 @@ const fillOnboardingForm = () => {
   if ($("onb-app-antigravity")) {
     $("onb-app-antigravity").checked = allowlist.includes("antigravity");
   }
-  if ($("onb-app-terminal")) {
-    $("onb-app-terminal").checked = allowlist.includes("terminal");
-  }
   if ($("onb-app-chrome")) {
     $("onb-app-chrome").checked = allowlist.includes("chrome");
   }
   const requireApprovalFor = Array.isArray(onboarding.macControl?.requireApprovalFor)
     ? onboarding.macControl.requireApprovalFor
     : [];
-  if ($("onb-approval-terminal-exec")) {
-    $("onb-approval-terminal-exec").checked = requireApprovalFor.includes("terminal_exec");
-  }
   if ($("onb-approval-app-launch")) {
     $("onb-approval-app-launch").checked = requireApprovalFor.includes("app_launch");
-  }
-  if ($("onb-approval-codex-exec")) {
-    $("onb-approval-codex-exec").checked = requireApprovalFor.includes("codex_exec");
   }
   if ($("onb-approval-browser-external")) {
     $("onb-approval-browser-external").checked = requireApprovalFor.includes("browser_external");
@@ -3349,9 +2626,30 @@ const fillOnboardingForm = () => {
 
 const collectOnboardingPayload = () => {
   const derived = state.derivedPersona || {};
+  const existingOnboarding = state.onboarding || {};
+  const preservedCodeExtension = existingOnboarding.extensions?.code || {};
+  const existingAllowlist = Array.isArray(existingOnboarding.macControl?.appAllowlist)
+    ? existingOnboarding.macControl.appAllowlist
+    : [];
+  const existingRequireApprovalFor = Array.isArray(existingOnboarding.macControl?.requireApprovalFor)
+    ? existingOnboarding.macControl.requireApprovalFor
+    : [];
   const derivedExamples = Array.isArray(derived.postExamples)
     ? derived.postExamples.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 20)
     : [];
+  const visibleAllowlist = [
+    $("onb-app-antigravity")?.checked ? "antigravity" : null,
+    $("onb-app-chrome")?.checked ? "chrome" : null,
+  ].filter(Boolean);
+  const preservedAllowlist = existingAllowlist.filter((entry) => entry === "terminal");
+  const visibleRequireApprovalFor = [
+    $("onb-approval-app-launch")?.checked ? "app_launch" : null,
+    $("onb-approval-browser-external")?.checked ? "browser_external" : null,
+    $("onb-approval-write-command")?.checked ? "write_command" : null,
+  ].filter(Boolean);
+  const preservedRequireApprovalFor = existingRequireApprovalFor.filter(
+    (entry) => entry === "terminal_exec" || entry === "codex_exec",
+  );
   return {
     providers: {
       mode: $("onb-provider-mode")?.value || "openrouter",
@@ -3382,11 +2680,11 @@ const collectOnboardingPayload = () => {
         approvalRequiredForWrite: Boolean($("onb-x-approval-write")?.checked),
       },
       code: {
-        enabled: Boolean($("onb-code-extension-enabled")?.checked),
-        mode: $("onb-code-extension-mode")?.value || "manual",
-        approvalRequiredForWrite: Boolean($("onb-code-approval-write")?.checked),
-        allowReadOnlyAutonomy: Boolean($("onb-code-readonly-auto")?.checked),
-        workingDirectory: $("onb-code-working-dir")?.value?.trim() || undefined,
+        enabled: Boolean(preservedCodeExtension.enabled),
+        mode: preservedCodeExtension.mode || "manual",
+        approvalRequiredForWrite: Boolean(preservedCodeExtension.approvalRequiredForWrite),
+        allowReadOnlyAutonomy: Boolean(preservedCodeExtension.allowReadOnlyAutonomy),
+        workingDirectory: preservedCodeExtension.workingDirectory || undefined,
       },
     },
     x: {
@@ -3417,18 +2715,8 @@ const collectOnboardingPayload = () => {
       approvalTTLMinutes: toInt($("onb-autonomy-approval-ttl")?.value, 30),
     },
     macControl: {
-      appAllowlist: [
-        $("onb-app-antigravity")?.checked ? "antigravity" : null,
-        $("onb-app-terminal")?.checked ? "terminal" : null,
-        $("onb-app-chrome")?.checked ? "chrome" : null,
-      ].filter(Boolean),
-      requireApprovalFor: [
-        $("onb-approval-app-launch")?.checked ? "app_launch" : null,
-        $("onb-approval-terminal-exec")?.checked ? "terminal_exec" : null,
-        $("onb-approval-codex-exec")?.checked ? "codex_exec" : null,
-        $("onb-approval-browser-external")?.checked ? "browser_external" : null,
-        $("onb-approval-write-command")?.checked ? "write_command" : null,
-      ].filter(Boolean),
+      appAllowlist: [...new Set([...visibleAllowlist, ...preservedAllowlist])],
+      requireApprovalFor: [...new Set([...visibleRequireApprovalFor, ...preservedRequireApprovalFor])],
     },
     watch: {
       enabled: Boolean($("onb-watch-enabled")?.checked),
@@ -3669,8 +2957,6 @@ const bindOnboardingEvents = () => {
       await refreshExtensions();
       await refreshAutonomy();
       await refreshApprovals();
-      await refreshCodeStatus();
-      await refreshCodeApprovals();
       await refreshSkills();
       await refreshTasks();
       await refreshMacApps();
@@ -3746,13 +3032,6 @@ const bindDashboardEvents = () => {
       if (!command) {
         return;
       }
-      if (command === "/terminal") {
-        if ($("cowork-task-input")) {
-          $("cowork-task-input").value = "/terminal ";
-          $("cowork-task-input").focus();
-        }
-        return;
-      }
       addCoworkMessage("user", command);
       try {
         await runCoworkSlashCommand(command);
@@ -3822,37 +3101,10 @@ const bindDashboardEvents = () => {
     }
   });
 
-  $("cowork-quick-terminal")?.addEventListener("click", async () => {
-    try {
-      const result = await runCoworkQuickAction("open_terminal");
-      addCoworkMessage("agent", `Queued quick action: open_terminal (${result?.task?.id || "task"})`);
-    } catch (error) {
-      setText("cowork-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
   $("cowork-quick-chrome")?.addEventListener("click", async () => {
     try {
       const result = await runCoworkQuickAction("open_chrome");
       addCoworkMessage("agent", `Queued quick action: open_chrome (${result?.task?.id || "task"})`);
-    } catch (error) {
-      setText("cowork-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("cowork-quick-codex")?.addEventListener("click", async () => {
-    try {
-      const result = await runCoworkQuickAction("run_codex");
-      addCoworkMessage("agent", `Queued quick action: run_codex (${result?.task?.id || "task"})`);
-    } catch (error) {
-      setText("cowork-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("cowork-quick-claude")?.addEventListener("click", async () => {
-    try {
-      const result = await runCoworkQuickAction("run_claude");
-      addCoworkMessage("agent", `Queued quick action: run_claude (${result?.task?.id || "task"})`);
     } catch (error) {
       setText("cowork-output", error instanceof Error ? error.message : String(error));
     }
@@ -3914,209 +3166,6 @@ const bindDashboardEvents = () => {
     }
   });
 
-  $("cowork-mission-coding")?.addEventListener("click", async () => {
-    try {
-      const seedPrompt = ($("cowork-mission-prompt")?.value || "").trim() || "Audit this repository and outline safe improvements.";
-      const result = await apiPost("/api/agent/tasks/chain", {
-        startTask: true,
-        tasks: [
-          {
-            prompt: seedPrompt,
-            skillId: "codex.run_task",
-            args: {
-              prompt: seedPrompt,
-            },
-          },
-          {
-            prompt: "Convert findings into a prioritized implementation sequence with guardrails.",
-            skillId: "claude.run_task",
-            args: {
-              prompt: "Convert findings into a prioritized implementation sequence with guardrails.",
-            },
-          },
-        ],
-      });
-      setText("cowork-output", result);
-      const firstTaskId = result?.tasks?.[0]?.id;
-      if (firstTaskId && $("task-id")) {
-        $("task-id").value = firstTaskId;
-      }
-      if (firstTaskId && $("cowork-log-task-select")) {
-        $("cowork-log-task-select").value = firstTaskId;
-      }
-      await refreshTasks();
-      await refreshCoworkState();
-      await refreshTaskLogTail();
-      addCoworkMessage("agent", `Coding mission chain queued (${result?.chain?.length || 0} tasks).`);
-    } catch (error) {
-      setText("cowork-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("code-plan-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const task = ($("code-plan-task")?.value || "").trim();
-    if (!task) {
-      setText("code-plan-output", "Task is required.");
-      return;
-    }
-    try {
-      setText("code-plan-output", "Generating coding plan...");
-      const result = await apiPost("/api/code/plan", {
-        task,
-      });
-      setText("code-plan-output", result);
-      addCoworkMessage("agent", result?.plan || "Coding plan generated.");
-      logActivity("Code plan generated", {
-        task,
-        provider: result?.provider,
-      });
-    } catch (error) {
-      setText("code-plan-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("code-exec-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const command = ($("code-exec-command")?.value || "").trim();
-    const cwd = ($("code-exec-cwd")?.value || "").trim();
-    if (!command) {
-      setText("code-exec-output", "Command is required.");
-      return;
-    }
-    try {
-      setText("code-exec-output", "Running command...");
-      const result = await apiPost("/api/code/exec", {
-        command,
-        cwd: cwd || undefined,
-      });
-      setText("code-exec-output", result);
-      await refreshCodeStatus();
-      await refreshCodeApprovals();
-      await refreshTerminalSessions();
-      if (result?.session?.id) {
-        await loadTerminalSession(result.session.id);
-      }
-      logActivity("Code command executed", {
-        command,
-        ok: result?.ok,
-        approvalId: result?.approvalId || null,
-      });
-    } catch (error) {
-      setText("code-exec-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("code-status-refresh")?.addEventListener("click", async () => {
-    try {
-      await refreshCodeStatus();
-      await refreshCodeApprovals();
-    } catch (error) {
-      setText("code-status-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("code-approvals-refresh")?.addEventListener("click", async () => {
-    try {
-      await refreshCodeApprovals();
-    } catch (error) {
-      setText("code-approvals-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("code-approval-approve")?.addEventListener("click", async () => {
-    const id = ($("code-approval-id")?.value || "").trim();
-    if (!id) {
-      setText("code-approvals-output", "Code approval ID is required.");
-      return;
-    }
-    try {
-      const result = await apiPost(`/api/code/approvals/${encodeURIComponent(id)}/approve`, {});
-      setText("code-approvals-output", result);
-      if (result?.result) {
-        setText("code-exec-output", result.result);
-      }
-      await refreshCodeStatus();
-      await refreshCodeApprovals();
-      await refreshTerminalSessions();
-      if (result?.result?.session?.id) {
-        await loadTerminalSession(result.result.session.id);
-      }
-      logActivity("Code approval executed", { id, ok: result?.ok });
-    } catch (error) {
-      setText("code-approvals-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("code-approval-reject")?.addEventListener("click", async () => {
-    const id = ($("code-approval-id")?.value || "").trim();
-    if (!id) {
-      setText("code-approvals-output", "Code approval ID is required.");
-      return;
-    }
-    try {
-      const result = await apiPost(`/api/code/approvals/${encodeURIComponent(id)}/reject`, {});
-      setText("code-approvals-output", result);
-      await refreshCodeStatus();
-      await refreshCodeApprovals();
-      logActivity("Code approval rejected", { id, ok: result?.ok });
-    } catch (error) {
-      setText("code-approvals-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("terminal-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const command = ($("terminal-command")?.value || "").trim();
-    const cwd = ($("terminal-cwd")?.value || "").trim();
-    if (!command) {
-      setText("terminal-output", "Command is required.");
-      return;
-    }
-    try {
-      await runEmbeddedTerminalCommand(command, cwd);
-      addCoworkMessage("agent", `Terminal command queued: ${command}`);
-    } catch (error) {
-      setText("terminal-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("terminal-refresh")?.addEventListener("click", async () => {
-    try {
-      await refreshTerminalSessions();
-      if (state.terminalActiveSessionId) {
-        await loadTerminalSession(state.terminalActiveSessionId);
-      }
-    } catch (error) {
-      setText("terminal-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("terminal-load")?.addEventListener("click", async () => {
-    const selected = ($("terminal-session-select")?.value || "").trim() || state.terminalActiveSessionId;
-    try {
-      await loadTerminalSession(selected);
-    } catch (error) {
-      setText("terminal-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("terminal-clear")?.addEventListener("click", () => {
-    setText("terminal-output", "");
-  });
-
-  $("terminal-session-select")?.addEventListener("change", async () => {
-    const selected = ($("terminal-session-select")?.value || "").trim();
-    state.terminalActiveSessionId = selected;
-    if (!selected) {
-      return;
-    }
-    try {
-      await loadTerminalSession(selected);
-    } catch (error) {
-      setText("terminal-output", error instanceof Error ? error.message : String(error));
-    }
-  });
 
   $("heartbeat-refresh")?.addEventListener("click", async () => {
     try {
@@ -4166,29 +3215,10 @@ const bindDashboardEvents = () => {
     }
   });
 
-  $("integration-open-terminal")?.addEventListener("click", async () => {
-    try {
-      await runIntegrationAppOpen("terminal");
-    } catch (error) {
-      setText("integrations-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
   $("integration-open-chrome")?.addEventListener("click", async () => {
     const url = ($("cowork-quick-url")?.value || "").trim() || "https://x.com/home";
     try {
       await runIntegrationAppOpen("chrome", url);
-    } catch (error) {
-      setText("integrations-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("integration-claude-login")?.addEventListener("click", async () => {
-    try {
-      const result = await apiPost("/api/claude/login/start", {});
-      setText("integrations-output", result);
-      await refreshProviderStatus();
-      await refreshIntegrations();
     } catch (error) {
       setText("integrations-output", error instanceof Error ? error.message : String(error));
     }
@@ -4348,7 +3378,6 @@ const bindDashboardEvents = () => {
   $("ext-refresh")?.addEventListener("click", async () => {
     try {
       await refreshExtensions();
-      await refreshCodeStatus();
     } catch (error) {
       setText("extensions-output", error instanceof Error ? error.message : String(error));
     }
@@ -4371,30 +3400,6 @@ const bindDashboardEvents = () => {
       setText("extensions-output", result);
       await refreshExtensions();
       logActivity("Disabled x-social extension", result);
-    } catch (error) {
-      setText("extensions-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("ext-code-enable")?.addEventListener("click", async () => {
-    try {
-      const result = await apiPost("/api/extensions/code-workspace/enable", {});
-      setText("extensions-output", result);
-      await refreshExtensions();
-      await refreshCodeStatus();
-      logActivity("Enabled code-workspace extension", result);
-    } catch (error) {
-      setText("extensions-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("ext-code-disable")?.addEventListener("click", async () => {
-    try {
-      const result = await apiPost("/api/extensions/code-workspace/disable", {});
-      setText("extensions-output", result);
-      await refreshExtensions();
-      await refreshCodeStatus();
-      logActivity("Disabled code-workspace extension", result);
     } catch (error) {
       setText("extensions-output", error instanceof Error ? error.message : String(error));
     }
@@ -5295,224 +4300,6 @@ const bindDashboardEvents = () => {
     }
   });
 
-  $("workspace-tree-refresh")?.addEventListener("click", async () => {
-    try {
-      await refreshWorkspaceTree();
-    } catch (error) {
-      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("workspace-tree-up")?.addEventListener("click", async () => {
-    try {
-      const current = $("workspace-tree-path")?.value || "";
-      const next = parentWorkbenchRelDir(current);
-      if ($("workspace-tree-path")) {
-        $("workspace-tree-path").value = next;
-      }
-      await refreshWorkspaceTree();
-    } catch (error) {
-      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("workspace-tree")?.addEventListener("click", async (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-    const relPath = (target.dataset.workspacePath || "").trim();
-    const type = (target.dataset.workspaceType || "").trim();
-    if (!relPath || !type) {
-      return;
-    }
-    if (type === "dir") {
-      if ($("workspace-tree-path")) {
-        $("workspace-tree-path").value = relPath;
-      }
-      try {
-        await refreshWorkspaceTree();
-      } catch (error) {
-        setText("workspace-file-output", error instanceof Error ? error.message : String(error));
-      }
-      return;
-    }
-    if ($("workspace-file-path")) {
-      $("workspace-file-path").value = relPath;
-    }
-    try {
-      await loadWorkspaceFile(relPath);
-    } catch (error) {
-      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("workspace-file-load")?.addEventListener("click", async () => {
-    try {
-      await loadWorkspaceFile();
-    } catch (error) {
-      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("workspace-file-dryrun")?.addEventListener("click", async () => {
-    try {
-      await dryRunWorkspaceSave();
-    } catch (error) {
-      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("workspace-file-save")?.addEventListener("click", async () => {
-    try {
-      await executeWorkspaceSave();
-    } catch (error) {
-      setText("workspace-file-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("git-refresh")?.addEventListener("click", async () => {
-    try {
-      await refreshGitStatus();
-    } catch (error) {
-      setText("git-status-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("git-log")?.addEventListener("click", async () => {
-    try {
-      await refreshGitLog();
-    } catch (error) {
-      setText("git-action-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("git-diff-unstaged")?.addEventListener("click", async () => {
-    try {
-      await refreshGitDiff(false);
-    } catch (error) {
-      setText("git-diff-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("git-diff-staged")?.addEventListener("click", async () => {
-    try {
-      await refreshGitDiff(true);
-    } catch (error) {
-      setText("git-diff-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("git-branch-dryrun")?.addEventListener("click", async () => {
-    try {
-      await dryRunGitAction("create_branch");
-    } catch (error) {
-      setText("git-action-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("git-branch-exec")?.addEventListener("click", async () => {
-    try {
-      await executeGitAction("create_branch");
-    } catch (error) {
-      setText("git-action-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("git-commit-dryrun")?.addEventListener("click", async () => {
-    try {
-      await dryRunGitAction("commit");
-    } catch (error) {
-      setText("git-action-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("git-commit-exec")?.addEventListener("click", async () => {
-    try {
-      await executeGitAction("commit");
-    } catch (error) {
-      setText("git-action-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("git-push-dryrun")?.addEventListener("click", async () => {
-    try {
-      await dryRunGitAction("push");
-    } catch (error) {
-      setText("git-action-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("git-push-exec")?.addEventListener("click", async () => {
-    try {
-      await executeGitAction("push");
-    } catch (error) {
-      setText("git-action-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("terminal-pty-refresh")?.addEventListener("click", async () => {
-    try {
-      await refreshTerminalPtySessions();
-    } catch (error) {
-      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("terminal-pty-create")?.addEventListener("click", async () => {
-    try {
-      await createTerminalPtySession();
-    } catch (error) {
-      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("terminal-pty-close")?.addEventListener("click", async () => {
-    try {
-      await closeTerminalPtySession();
-    } catch (error) {
-      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("terminal-pty-connect")?.addEventListener("click", () => {
-    connectTerminalPtyWs();
-  });
-
-  $("terminal-pty-disconnect")?.addEventListener("click", () => {
-    disconnectTerminalPtyWs();
-  });
-
-  $("terminal-pty-send")?.addEventListener("click", async () => {
-    try {
-      await sendTerminalPtyInput(false);
-    } catch (error) {
-      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("terminal-pty-sendline")?.addEventListener("click", async () => {
-    try {
-      await sendTerminalPtyInput(true);
-    } catch (error) {
-      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  $("terminal-pty-input")?.addEventListener("keydown", async (event) => {
-    if (!(event instanceof KeyboardEvent)) {
-      return;
-    }
-    if (event.key !== "Enter") {
-      return;
-    }
-    event.preventDefault();
-    try {
-      await sendTerminalPtyInput(true);
-    } catch (error) {
-      setText("terminal-pty-output", error instanceof Error ? error.message : String(error));
-    }
-  });
 };
 
 const boot = async () => {
@@ -5532,9 +4319,6 @@ const boot = async () => {
   await refreshExtensions();
   await refreshAutonomy();
   await refreshApprovals();
-  await refreshCodeStatus();
-  await refreshCodeApprovals();
-  await refreshTerminalSessions();
   await refreshSkills();
   await refreshTasks();
   await refreshCoworkState();
@@ -5547,16 +4331,6 @@ const boot = async () => {
   await refreshIntegrationSubscribers();
   await refreshIntegrationBridgeStatus();
   await refreshTaskLogTail();
-  try {
-    await refreshWorkspaceTree();
-  } catch {
-    // ignore workbench init errors
-  }
-  try {
-    await refreshGitStatus();
-  } catch {
-    // ignore workbench init errors
-  }
   renderWatchObserverMeta();
   const initialWatchSession = resolveActiveWatchSession();
   if (initialWatchSession) {
@@ -5572,7 +4346,6 @@ const boot = async () => {
         refreshIntegrations(),
         refreshIntegrationBridgeStatus(),
         refreshIntegrationActionHistory(),
-        refreshTerminalSessions(),
       ]);
     } catch {
       // keep dashboard responsive even if one refresh cycle fails

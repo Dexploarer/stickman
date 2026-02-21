@@ -11,6 +11,11 @@ const dashboardAppSource = readFileSync(
   "utf8"
 );
 
+const dashboardHtml = readFileSync(
+  new URL("../web/index.html", import.meta.url),
+  "utf8"
+);
+
 const webStyles = readFileSync(
   new URL("../web/styles.css", import.meta.url),
   "utf8"
@@ -47,5 +52,43 @@ describe("dashboard workbench layout", () => {
     expect(webStyles).toContain(".panel-drag-handle {");
     expect(webStyles).toContain(".dashboard-modal-overlay {");
     expect(webStyles).toContain(".cowork-grid {");
+  });
+
+  it("keeps social + X panels and removes coding-focused surface ids", () => {
+    expect(dashboardHtml).toContain("id=\"login-form\"");
+    expect(dashboardHtml).toContain("id=\"tweet-form\"");
+    expect(dashboardHtml).toContain("id=\"x-algo-form\"");
+    expect(dashboardHtml).toContain("id=\"ai-form\"");
+    expect(dashboardHtml).toContain("id=\"ai-image-form\"");
+    expect(dashboardHtml).toContain("id=\"ai-video-form\"");
+    expect(dashboardHtml).toContain("id=\"plan-form\"");
+    expect(dashboardHtml).toContain("id=\"workflow-run\"");
+    expect(dashboardHtml).toContain("id=\"cowork-mission-social\"");
+
+    expect(dashboardHtml).not.toContain("id=\"cowork-quick-terminal\"");
+    expect(dashboardHtml).not.toContain("id=\"cowork-quick-codex\"");
+    expect(dashboardHtml).not.toContain("id=\"cowork-quick-claude\"");
+    expect(dashboardHtml).not.toContain("id=\"cowork-mission-coding\"");
+    expect(dashboardHtml).not.toContain("id=\"ext-code-enable\"");
+    expect(dashboardHtml).not.toContain("id=\"ext-code-disable\"");
+    expect(dashboardHtml).not.toContain("id=\"integration-open-terminal\"");
+    expect(dashboardHtml).not.toContain("id=\"integration-claude-login\"");
+    expect(dashboardHtml).not.toContain("id=\"code-plan-form\"");
+    expect(dashboardHtml).not.toContain("id=\"terminal-pty-refresh\"");
+  });
+
+  it("does not keep stale app bindings for removed coding ids", () => {
+    expect(dashboardAppSource).not.toContain("cowork-quick-terminal");
+    expect(dashboardAppSource).not.toContain("cowork-quick-codex");
+    expect(dashboardAppSource).not.toContain("cowork-quick-claude");
+    expect(dashboardAppSource).not.toContain("cowork-mission-coding");
+    expect(dashboardAppSource).not.toContain("integration-open-terminal");
+    expect(dashboardAppSource).not.toContain("integration-claude-login");
+    expect(dashboardAppSource).not.toContain("ext-code-enable");
+    expect(dashboardAppSource).not.toContain("ext-code-disable");
+    expect(dashboardAppSource).not.toContain("code-plan-form");
+    expect(dashboardAppSource).not.toContain("terminal-pty");
+    expect(dashboardAppSource).not.toContain("workspace-tree");
+    expect(dashboardAppSource).not.toContain("git-refresh");
   });
 });
