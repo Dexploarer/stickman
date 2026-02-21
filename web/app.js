@@ -1,3 +1,16 @@
+import {
+  buildThreadOutline,
+  CONTEXT_ACTION_ID_SET,
+  CONTEXT_STORAGE_KEYS,
+  deriveContextTags,
+  normalizeContextSourcePayload,
+  readPersistedJSON,
+  resolveContextText,
+  runContextAction,
+  upsertContextInboxItem,
+  writePersistedJSON,
+} from "./context-actions.js";
+
 const HISTORY_KEY = "prompt-or-die-social-suite.history.v1";
 const COWORK_CHAT_KEY = "prompt-or-die-social-suite.cowork.chat.v1";
 const MAX_HISTORY = 50;
@@ -6,6 +19,10 @@ const DASHBOARD_VIEW_KEY = "prompt-or-die-social-suite.dashboard.view.v1";
 const DASHBOARD_CUSTOM_PANELS_KEY = "prompt-or-die-social-suite.dashboard.custom-panels.v1";
 const DASHBOARD_MAX_CUSTOM_PANELS = 16;
 const DASHBOARD_PANEL_SIZE_ORDER = ["auto", "wide", "tall", "large"];
+const CONTEXT_INBOX_MAX_ITEMS = 120;
+const CONTEXT_DEFAULT_PREFS = Object.freeze({
+  pickerLastAction: "post.append_to_composer",
+});
 const DASHBOARD_PAGE_TABS = [
   { id: "operations", label: "Operations" },
   { id: "studio", label: "Studio" },
@@ -59,6 +76,14 @@ const state = {
   integrationActionHistory: [],
   integrationSubscribers: [],
   integrationBridgeStatus: null,
+  contextInbox: [],
+  contextPrefs: { ...CONTEXT_DEFAULT_PREFS },
+  utilityRail: {
+    collapsed: false,
+  },
+  desktopCapabilities: {
+    nativeContextMenu: false,
+  },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -193,6 +218,437 @@ const deriveDashboardPanelMeta = (title) => {
   };
 };
 
+const readContextInbox = () => {
+  const parsed = readPersistedJSON(window.localStorage, CONTEXT_STORAGE_KEYS.inbox, []);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  let next = [];
+  parsed.forEach((item) => {
+    next = upsertContextInboxItem(next, item, CONTEXT_INBOX_MAX_ITEMS);
+  });
+  return next.slice(0, CONTEXT_INBOX_MAX_ITEMS);
+};
+
+const writeContextInbox = () => {
+  writePersistedJSON(window.localStorage, CONTEXT_STORAGE_KEYS.inbox, state.contextInbox.slice(0, CONTEXT_INBOX_MAX_ITEMS));
+};
+
+const readContextPrefs = () => {
+  const parsed = readPersistedJSON(window.localStorage, CONTEXT_STORAGE_KEYS.prefs, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ...CONTEXT_DEFAULT_PREFS };
+  }
+  const nextAction = String(parsed.pickerLastAction || CONTEXT_DEFAULT_PREFS.pickerLastAction).trim();
+  return {
+    pickerLastAction: CONTEXT_ACTION_ID_SET.has(nextAction) ? nextAction : CONTEXT_DEFAULT_PREFS.pickerLastAction,
+  };
+};
+
+const writeContextPrefs = () => {
+  writePersistedJSON(window.localStorage, CONTEXT_STORAGE_KEYS.prefs, state.contextPrefs);
+};
+
+const readUtilityRailState = () => {
+  const parsed = readPersistedJSON(window.localStorage, CONTEXT_STORAGE_KEYS.utilityRail, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { collapsed: false };
+  }
+  return {
+    collapsed: Boolean(parsed.collapsed),
+  };
+};
+
+const writeUtilityRailState = () => {
+  writePersistedJSON(window.localStorage, CONTEXT_STORAGE_KEYS.utilityRail, state.utilityRail);
+};
+
+const setContextFeedback = (message) => {
+  const node = $("context-feedback-line");
+  if (node) {
+    node.textContent = String(message || "").trim();
+  }
+};
+
+const setFormFieldValue = (id, value, mode = "replace") => {
+  const field = $(id);
+  if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) {
+    return false;
+  }
+  const nextText = String(value || "").trim();
+  if (!nextText) {
+    return false;
+  }
+  if (mode === "append") {
+    const current = String(field.value || "").trim();
+    field.value = current ? `${current}\n\n${nextText}` : nextText;
+  } else {
+    field.value = nextText;
+  }
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  return true;
+};
+
+const updateContextInbox = (nextItems) => {
+  state.contextInbox = (Array.isArray(nextItems) ? nextItems : []).slice(0, CONTEXT_INBOX_MAX_ITEMS);
+  writeContextInbox();
+  renderContextInbox();
+};
+
+const setUtilityRailSourceText = (text) => {
+  const field = $("context-rail-source");
+  if (field instanceof HTMLTextAreaElement) {
+    field.value = String(text || "").trim();
+  }
+};
+
+const getUtilityRailSourceText = () => {
+  const direct = ($("context-rail-source")?.value || "").trim();
+  if (direct) {
+    return direct;
+  }
+  if (state.contextInbox[0]?.text) {
+    return String(state.contextInbox[0].text || "").trim();
+  }
+  const selected = window.getSelection?.()?.toString?.().trim();
+  return selected || "";
+};
+
+const markContextInboxItemConsumed = (itemId, consumedBy) => {
+  const id = String(itemId || "").trim();
+  if (!id) {
+    return;
+  }
+  const next = state.contextInbox.map((item) =>
+    item.id === id
+      ? {
+          ...item,
+          consumedBy: consumedBy || undefined,
+        }
+      : item,
+  );
+  updateContextInbox(next);
+};
+
+const captureContextToInbox = ({ item, context, actionId }) => {
+  const mergedTags = [...new Set([...(item?.tags || []), ...deriveContextTags(actionId, context)])].slice(0, 8);
+  const nextItem = {
+    ...item,
+    tags: mergedTags,
+    source: context?.sourceHint || item?.source || "context",
+  };
+  updateContextInbox(upsertContextInboxItem(state.contextInbox, nextItem, CONTEXT_INBOX_MAX_ITEMS));
+  if (!(($("context-rail-source")?.value || "").trim())) {
+    setUtilityRailSourceText(nextItem.text || "");
+  }
+};
+
+const contextPayloadFromSelection = (sourceHint = "web-fallback-picker") =>
+  normalizeContextSourcePayload({
+    selectionText: window.getSelection?.()?.toString?.().trim() || "",
+    pageURL: window.location?.href || "",
+    x: window.scrollX || 0,
+    y: window.scrollY || 0,
+    ts: Date.now(),
+    sourceHint,
+  });
+
+const parseTagInput = (raw) => {
+  return [...new Set(String(raw || "")
+    .split(",")
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean))]
+    .slice(0, 8);
+};
+
+const renderContextInbox = () => {
+  const node = $("context-inbox-list");
+  if (!node) {
+    return;
+  }
+  node.innerHTML = "";
+  if (!state.contextInbox.length) {
+    const empty = document.createElement("p");
+    empty.className = "summary";
+    empty.textContent = "No context captured yet. Use right-click (desktop) or Send Context.";
+    node.appendChild(empty);
+    return;
+  }
+  state.contextInbox.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "context-inbox-item";
+    card.dataset.contextItemId = item.id;
+
+    const head = document.createElement("div");
+    head.className = "context-inbox-head";
+    const title = document.createElement("strong");
+    title.textContent = item.source || "context";
+    const time = document.createElement("small");
+    time.textContent = new Date(item.createdAt || Date.now()).toLocaleString();
+    head.append(title, time);
+
+    const text = document.createElement("pre");
+    text.className = "context-inbox-text";
+    text.textContent = String(item.text || "");
+
+    const tags = document.createElement("div");
+    tags.className = "context-inbox-tags";
+    (item.tags || []).forEach((tag) => {
+      const chip = document.createElement("span");
+      chip.className = "context-tag";
+      chip.textContent = tag;
+      tags.appendChild(chip);
+    });
+
+    const tagEditor = document.createElement("div");
+    tagEditor.className = "context-tag-editor";
+    const tagInput = document.createElement("input");
+    tagInput.type = "text";
+    tagInput.value = (item.tags || []).join(", ");
+    tagInput.dataset.contextTagInput = item.id;
+    tagInput.placeholder = "tags: tweet, trend, prompt";
+    const saveTags = document.createElement("button");
+    saveTags.type = "button";
+    saveTags.className = "ghost";
+    saveTags.dataset.contextAction = "save-tags";
+    saveTags.dataset.contextItemId = item.id;
+    saveTags.textContent = "Save Tags";
+    tagEditor.append(tagInput, saveTags);
+
+    const actions = document.createElement("div");
+    actions.className = "context-inbox-actions";
+    [
+      ["Composer", "composer"],
+      ["Planner", "planner"],
+      ["Chat", "chat"],
+      ["Mission", "mission"],
+    ].forEach(([label, target]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost";
+      button.dataset.contextAction = "dispatch";
+      button.dataset.contextTarget = target;
+      button.dataset.contextItemId = item.id;
+      button.textContent = label;
+      actions.appendChild(button);
+    });
+
+    const metaActions = document.createElement("div");
+    metaActions.className = "context-inbox-meta-actions";
+
+    const pinButton = document.createElement("button");
+    pinButton.type = "button";
+    pinButton.className = "ghost";
+    pinButton.dataset.contextAction = "pin-toggle";
+    pinButton.dataset.contextItemId = item.id;
+    pinButton.textContent = item.pinned ? "Unpin" : "Pin";
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "ghost";
+    removeButton.dataset.contextAction = "remove";
+    removeButton.dataset.contextItemId = item.id;
+    removeButton.textContent = "Archive";
+
+    metaActions.append(pinButton, removeButton);
+
+    if (item.consumedBy) {
+      const consumed = document.createElement("p");
+      consumed.className = "summary";
+      consumed.textContent = `Last sent: ${item.consumedBy}`;
+      card.append(head, text, tags, tagEditor, actions, metaActions, consumed);
+    } else {
+      card.append(head, text, tags, tagEditor, actions, metaActions);
+    }
+    node.appendChild(card);
+  });
+};
+
+const saveContextTags = (itemId, rawTags) => {
+  const id = String(itemId || "").trim();
+  if (!id) {
+    return;
+  }
+  const tags = parseTagInput(rawTags);
+  const next = state.contextInbox.map((item) => (item.id === id ? { ...item, tags } : item));
+  updateContextInbox(next);
+};
+
+const removeContextInboxItem = (itemId) => {
+  const id = String(itemId || "").trim();
+  if (!id) {
+    return;
+  }
+  updateContextInbox(state.contextInbox.filter((item) => item.id !== id));
+};
+
+const togglePinnedContextInboxItem = (itemId) => {
+  const id = String(itemId || "").trim();
+  if (!id) {
+    return;
+  }
+  const next = state.contextInbox.map((item) =>
+    item.id === id
+      ? {
+          ...item,
+          pinned: !item.pinned,
+        }
+      : item,
+  );
+  updateContextInbox(
+    [...next].sort((left, right) => {
+      if (left.pinned !== right.pinned) {
+        return left.pinned ? -1 : 1;
+      }
+      return String(right.createdAt).localeCompare(String(left.createdAt));
+    }),
+  );
+};
+
+const contextActionRouter = (payload) => {
+  const actionId = String(payload?.actionId || "").trim();
+  const context = normalizeContextSourcePayload(payload?.context || payload);
+  const result = runContextAction(actionId, context, {
+    setComposerDraft: ({ mode, text }) => {
+      setFormFieldValue("tweet-text", text, mode);
+    },
+    prefillPlannerGoal: ({ text }) => {
+      setFormFieldValue("plan-goal", text, "replace");
+    },
+    prefillMissionQuery: ({ text }) => {
+      setFormFieldValue("cowork-mission-query", text, "replace");
+    },
+    prefillCommandStudio: ({ text }) => {
+      setFormFieldValue("endpoint-filter", text, "replace");
+      renderEndpointOptions();
+    },
+    prefillChatPrompt: ({ text }) => {
+      setFormFieldValue("ai-prompt", text, "replace");
+    },
+    captureKnowledge: ({ item, context: sourceContext, actionId: sourceActionId }) => {
+      captureContextToInbox({ item, context: sourceContext, actionId: sourceActionId });
+    },
+  });
+
+  if (result.ok) {
+    state.contextPrefs = {
+      ...state.contextPrefs,
+      pickerLastAction: actionId,
+    };
+    writeContextPrefs();
+    setContextFeedback(`Context action applied: ${actionId}`);
+  } else {
+    setContextFeedback(`Context action ignored: ${result.reason || "unknown"}`);
+    if (result.reason === "unknown_action") {
+      console.error("Unknown context action received:", actionId, payload);
+    }
+  }
+  logActivity("Context action", {
+    actionId,
+    ok: result.ok,
+    reason: result.reason || null,
+    effect: result.effect || null,
+    sourceHint: context.sourceHint,
+  });
+  return result;
+};
+
+const contextTargetToActionId = (target) => {
+  if (target === "planner") {
+    return "tools.prefill_planner_goal";
+  }
+  if (target === "chat") {
+    return "chat.prefill_prompt";
+  }
+  if (target === "mission") {
+    return "tools.prefill_mission_query";
+  }
+  return "post.append_to_composer";
+};
+
+const contextTransformText = (type, sourceText) => {
+  const text = String(sourceText || "").trim();
+  if (!text) {
+    return "";
+  }
+  if (type === "tighten") {
+    return text
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 40)
+      .join(" ");
+  }
+  if (type === "cta") {
+    return `${text}\n\nDrop your take and I will build a sharper angle.`;
+  }
+  if (type === "threadify") {
+    return buildThreadOutline(text);
+  }
+  return text;
+};
+
+const syncUtilityRailState = () => {
+  const rail = $("dashboard-utility-rail");
+  if (!rail) {
+    return;
+  }
+  rail.classList.toggle("collapsed", Boolean(state.utilityRail.collapsed));
+  rail.setAttribute("aria-hidden", state.utilityRail.collapsed ? "true" : "false");
+  const toggle = $("utility-rail-toggle");
+  if (toggle) {
+    toggle.textContent = state.utilityRail.collapsed ? "Open Rail" : "Collapse";
+  }
+};
+
+const openContextPicker = (seedPayload) => {
+  const modal = $("context-action-picker");
+  if (!modal) {
+    return;
+  }
+  const selection = normalizeContextSourcePayload(seedPayload || contextPayloadFromSelection("web-context-picker"));
+  const area = $("context-picker-text");
+  if (area instanceof HTMLTextAreaElement) {
+    area.value = resolveContextText(selection);
+  }
+  const source = $("context-picker-source");
+  if (source) {
+    source.textContent = selection.selectionText ? "Selection detected" : "No selection - add context manually";
+  }
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+  const preferred = state.contextPrefs?.pickerLastAction;
+  if (preferred && CONTEXT_ACTION_ID_SET.has(preferred)) {
+    const preferredButton = modal.querySelector(`[data-context-picker-action="${preferred}"]`);
+    if (preferredButton instanceof HTMLButtonElement) {
+      preferredButton.focus();
+    }
+  }
+};
+
+const closeContextPicker = () => {
+  const modal = $("context-action-picker");
+  if (!modal) {
+    return;
+  }
+  modal.classList.remove("open");
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+};
+
+const syncContextSurfaceAvailability = () => {
+  const sendButton = $("context-send-btn");
+  if (sendButton) {
+    sendButton.classList.toggle("hidden", Boolean(state.desktopCapabilities.nativeContextMenu));
+  }
+  const modeNode = $("context-mode-hint");
+  if (modeNode) {
+    modeNode.textContent = state.desktopCapabilities.nativeContextMenu
+      ? "Native right-click context menu active."
+      : "Web fallback active: use Send Context or Cmd/Ctrl+Shift+K.";
+  }
+};
+
 const initDashboardWorkbench = () => {
   const root = $("dashboard-root");
   if (!root || root.dataset.workbenchReady === "true") {
@@ -200,6 +656,7 @@ const initDashboardWorkbench = () => {
   }
   const leftColumn = root.querySelector(":scope > aside.stack");
   const rightColumn = root.querySelector(":scope > section.stack");
+  const utilityRail = root.querySelector(":scope > aside.utility-rail");
   if (!(leftColumn instanceof HTMLElement) || !(rightColumn instanceof HTMLElement)) {
     return;
   }
@@ -259,6 +716,13 @@ const initDashboardWorkbench = () => {
   resetLayoutBtn.className = "ghost";
   resetLayoutBtn.textContent = "Reset Layout";
   actions.appendChild(resetLayoutBtn);
+
+  const sendContextBtn = document.createElement("button");
+  sendContextBtn.type = "button";
+  sendContextBtn.className = "ghost";
+  sendContextBtn.id = "context-send-btn";
+  sendContextBtn.textContent = "Send Context";
+  actions.appendChild(sendContextBtn);
 
   const customCountChip = document.createElement("span");
   customCountChip.className = "chip";
@@ -1048,7 +1512,15 @@ const initDashboardWorkbench = () => {
   updateCustomPanelCount();
   applyDashboardFilters();
 
-  workbench.append(toolbar, panelGrid);
+  const workspaceBody = document.createElement("div");
+  workspaceBody.className = "dashboard-workspace-body";
+  workspaceBody.appendChild(panelGrid);
+  if (utilityRail instanceof HTMLElement) {
+    utilityRail.classList.remove("hidden");
+    workspaceBody.appendChild(utilityRail);
+  }
+
+  workbench.append(toolbar, workspaceBody);
   root.classList.remove("layout");
   root.classList.add("dashboard-root-workbench");
   root.append(workbench, toolsModal);
@@ -2976,6 +3448,192 @@ const bindDashboardEvents = () => {
     setOnboardingVisibility(true);
   });
 
+  $("context-send-btn")?.addEventListener("click", () => {
+    openContextPicker(contextPayloadFromSelection("toolbar-send-context"));
+  });
+
+  $("utility-rail-toggle")?.addEventListener("click", () => {
+    state.utilityRail = {
+      ...state.utilityRail,
+      collapsed: !state.utilityRail.collapsed,
+    };
+    writeUtilityRailState();
+    syncUtilityRailState();
+  });
+
+  $("utility-source-use-selection")?.addEventListener("click", () => {
+    const selection = contextPayloadFromSelection("utility-rail-selection");
+    const text = resolveContextText(selection);
+    if (!text) {
+      setContextFeedback("No active selection to send.");
+      return;
+    }
+    setUtilityRailSourceText(text);
+    setContextFeedback("Loaded current selection into utility rail.");
+  });
+
+  $("utility-source-use-latest")?.addEventListener("click", () => {
+    const latest = state.contextInbox[0]?.text || "";
+    if (!latest) {
+      setContextFeedback("No captured context available yet.");
+      return;
+    }
+    setUtilityRailSourceText(latest);
+    setContextFeedback("Loaded latest inbox context into utility rail.");
+  });
+
+  $("context-inbox-list")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const action = String(target.dataset.contextAction || "").trim();
+    const itemId = String(target.dataset.contextItemId || "").trim();
+    if (!action || !itemId) {
+      return;
+    }
+    const item = state.contextInbox.find((entry) => entry.id === itemId);
+    if (!item) {
+      return;
+    }
+    if (action === "dispatch") {
+      const contextTarget = String(target.dataset.contextTarget || "").trim();
+      const actionId = contextTargetToActionId(contextTarget);
+      const result = contextActionRouter({
+        actionId,
+        context: normalizeContextSourcePayload({
+          selectionText: item.text,
+          pageURL: window.location.href,
+          sourceHint: `context-inbox:${item.id}`,
+        }),
+      });
+      if (result.ok) {
+        markContextInboxItemConsumed(item.id, contextTarget || "composer");
+      }
+      return;
+    }
+    if (action === "save-tags") {
+      const input = document.querySelector(`[data-context-tag-input="${itemId}"]`);
+      if (input instanceof HTMLInputElement) {
+        saveContextTags(itemId, input.value || "");
+        setContextFeedback(`Updated tags for ${item.source || "context"}.`);
+      }
+      return;
+    }
+    if (action === "pin-toggle") {
+      togglePinnedContextInboxItem(itemId);
+      return;
+    }
+    if (action === "remove") {
+      removeContextInboxItem(itemId);
+    }
+  });
+
+  const runUtilityPrefill = (actionId, sourceHint) => {
+    const sourceText = getUtilityRailSourceText();
+    if (!sourceText) {
+      setContextFeedback("Add or capture context first.");
+      return;
+    }
+    contextActionRouter({
+      actionId,
+      context: normalizeContextSourcePayload({
+        selectionText: sourceText,
+        pageURL: window.location.href,
+        sourceHint,
+      }),
+    });
+  };
+
+  document.querySelectorAll("[data-context-transform]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const transform = String(node.getAttribute("data-context-transform") || "").trim();
+      const sourceText = getUtilityRailSourceText();
+      if (!sourceText) {
+        setContextFeedback("Add or capture context first.");
+        return;
+      }
+      const transformed = contextTransformText(transform, sourceText);
+      if (!transformed) {
+        setContextFeedback("Unable to transform empty context.");
+        return;
+      }
+      contextActionRouter({
+        actionId: "post.replace_composer",
+        context: normalizeContextSourcePayload({
+          selectionText: transformed,
+          pageURL: window.location.href,
+          sourceHint: `utility-transform:${transform}`,
+        }),
+      });
+    });
+  });
+
+  $("utility-prefill-planner")?.addEventListener("click", () => {
+    runUtilityPrefill("tools.prefill_planner_goal", "utility-prefill-planner");
+  });
+  $("utility-prefill-mission")?.addEventListener("click", () => {
+    runUtilityPrefill("tools.prefill_mission_query", "utility-prefill-mission");
+  });
+  $("utility-prefill-command")?.addEventListener("click", () => {
+    runUtilityPrefill("tools.prefill_command_studio", "utility-prefill-command");
+  });
+  $("utility-archive-knowledge")?.addEventListener("click", () => {
+    runUtilityPrefill("knowledge.capture", "utility-archive");
+  });
+
+  $("context-picker-close")?.addEventListener("click", closeContextPicker);
+  $("context-picker-cancel")?.addEventListener("click", closeContextPicker);
+
+  $("context-action-picker")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target === $("context-action-picker")) {
+      closeContextPicker();
+      return;
+    }
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const actionId = String(target.dataset.contextPickerAction || "").trim();
+    if (!actionId) {
+      return;
+    }
+    const text = ($("context-picker-text")?.value || "").trim();
+    const context = normalizeContextSourcePayload({
+      selectionText: text,
+      pageURL: window.location.href,
+      sourceHint: "web-context-picker",
+    });
+    const result = contextActionRouter({
+      actionId,
+      context,
+    });
+    if (result.ok) {
+      closeContextPicker();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    const openShortcut = (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "k";
+    if (openShortcut) {
+      if (state.desktopCapabilities.nativeContextMenu) {
+        return;
+      }
+      event.preventDefault();
+      openContextPicker(contextPayloadFromSelection("keyboard-send-context"));
+      return;
+    }
+    if (event.key === "Escape" && $("context-action-picker")?.classList.contains("open")) {
+      closeContextPicker();
+    }
+  });
+
+  if (window.podDesktop?.onContextAction) {
+    window.podDesktop.onContextAction((payload) => {
+      contextActionRouter(payload);
+    });
+  }
+
   $("cowork-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const task = ($("cowork-task-input")?.value || "").trim();
@@ -4304,10 +4962,31 @@ const bindDashboardEvents = () => {
 const boot = async () => {
   state.history = loadHistory();
   state.coworkMessages = loadCoworkMessages();
+  state.contextInbox = readContextInbox();
+  state.contextPrefs = readContextPrefs();
+  state.utilityRail = readUtilityRailState();
+  if (window.podDesktop?.getDesktopCapabilities) {
+    try {
+      const caps = window.podDesktop.getDesktopCapabilities();
+      state.desktopCapabilities = {
+        nativeContextMenu: Boolean(caps?.nativeContextMenu),
+      };
+    } catch {
+      state.desktopCapabilities = {
+        nativeContextMenu: false,
+      };
+    }
+  }
   renderHistory();
   renderCoworkChat();
   renderCoworkConversations();
   initDashboardWorkbench();
+  renderContextInbox();
+  syncUtilityRailState();
+  syncContextSurfaceAvailability();
+  if (!(($("context-rail-source")?.value || "").trim()) && state.contextInbox[0]?.text) {
+    setUtilityRailSourceText(state.contextInbox[0].text);
+  }
   bindOnboardingEvents();
   bindDashboardEvents();
   await refreshHealth();

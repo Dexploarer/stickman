@@ -793,8 +793,74 @@
             </section>
           </article>
         </section>
+
+        <aside id="dashboard-utility-rail" class="utility-rail hidden" aria-hidden="false">
+          <div class="utility-rail-head">
+            <h2>Right Utility Rail</h2>
+            <button class="ghost" type="button" id="utility-rail-toggle">Collapse</button>
+          </div>
+          <p class="summary" id="context-mode-hint">Web fallback active: use Send Context or Cmd/Ctrl+Shift+K.</p>
+          <p class="summary" id="context-feedback-line">Context tools ready.</p>
+
+          <section class="sub-panel utility-section">
+            <h3>Context Inbox</h3>
+            <p class="summary">Capture context, edit tags, pin, and route into composer/planner/chat/mission.</p>
+            <div class="button-row">
+              <button class="ghost" type="button" id="utility-source-use-selection">Use Selection</button>
+              <button class="ghost" type="button" id="utility-source-use-latest">Use Latest</button>
+            </div>
+            <div id="context-inbox-list" class="context-inbox-list"></div>
+          </section>
+
+          <section class="sub-panel utility-section">
+            <h3>Post Builder Shortcuts</h3>
+            <p class="summary">Prefill only. No auto-posting.</p>
+            <label>Source context</label>
+            <textarea id="context-rail-source" rows="5" placeholder="Paste or capture context for transforms and tool prefills."></textarea>
+            <div class="button-grid utility-transform-grid">
+              <button class="ghost" type="button" data-context-transform="tighten">Tighten</button>
+              <button class="ghost" type="button" data-context-transform="threadify">Threadify</button>
+              <button class="ghost" type="button" data-context-transform="cta">CTA Variant</button>
+            </div>
+          </section>
+
+          <section class="sub-panel utility-section">
+            <h3>Tools + Knowledge Shortcuts</h3>
+            <div class="button-grid">
+              <button class="ghost" type="button" id="utility-prefill-planner">Prefill Planner Goal</button>
+              <button class="ghost" type="button" id="utility-prefill-mission">Prefill Mission Query</button>
+              <button class="ghost" type="button" id="utility-prefill-command">Prefill Command Studio</button>
+              <button class="ghost" type="button" id="utility-archive-knowledge">Archive to Knowledge</button>
+            </div>
+          </section>
+        </aside>
       </section>
     </main>
+
+    <div id="context-action-picker" class="dashboard-modal-overlay hidden context-picker-overlay" aria-hidden="true">
+      <div class="dashboard-modal-card context-picker-card" role="dialog" aria-modal="true" aria-labelledby="context-picker-title">
+        <div class="dashboard-modal-head">
+          <h3 id="context-picker-title">Send Context</h3>
+          <button class="ghost" type="button" id="context-picker-close">Close</button>
+        </div>
+        <p class="summary" id="context-picker-source">Capture selected text and route to social tools.</p>
+        <label>Context</label>
+        <textarea id="context-picker-text" rows="6" placeholder="Selected text appears here."></textarea>
+        <div class="button-grid context-picker-actions">
+          <button class="ghost" type="button" data-context-picker-action="post.append_to_composer">Append to Composer</button>
+          <button class="ghost" type="button" data-context-picker-action="post.replace_composer">Replace Composer</button>
+          <button class="ghost" type="button" data-context-picker-action="post.build_thread_outline">Build Thread Outline</button>
+          <button class="ghost" type="button" data-context-picker-action="tools.prefill_planner_goal">Prefill Planner Goal</button>
+          <button class="ghost" type="button" data-context-picker-action="tools.prefill_mission_query">Prefill Mission Query</button>
+          <button class="ghost" type="button" data-context-picker-action="tools.prefill_command_studio">Prefill Command Studio</button>
+          <button class="ghost" type="button" data-context-picker-action="chat.prefill_prompt">Prefill Chat Prompt</button>
+          <button class="ghost" type="button" data-context-picker-action="knowledge.capture">Save to Knowledge Inbox</button>
+        </div>
+        <div class="button-row">
+          <button class="ghost" type="button" id="context-picker-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="/app.js"></script>
   </body>

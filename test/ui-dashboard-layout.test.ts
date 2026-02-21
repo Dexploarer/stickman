@@ -40,10 +40,16 @@ describe("dashboard workbench layout", () => {
     expect(dashboardAppSource).toContain("custom-panel-notes");
     expect(dashboardAppSource).toContain("panel.dataset.panelSize");
     expect(dashboardAppSource).toContain("initDashboardWorkbench()");
+    expect(dashboardAppSource).toContain("contextActionRouter");
+    expect(dashboardAppSource).toContain("renderContextInbox");
     expect(dashboardAppSource).toContain("panel.draggable = true");
     expect(dashboardAppSource).toContain("dashboard-tool-item");
+    expect(dashboardAppSource).toContain("DASHBOARD_MAX_CUSTOM_PANELS = 16");
     expect(webStyles).toContain(".dashboard-workbench {");
     expect(webStyles).toContain(".dashboard-panel-grid {");
+    expect(webStyles).toContain(".dashboard-workspace-body {");
+    expect(webStyles).toContain(".utility-rail {");
+    expect(webStyles).toContain(".context-inbox-item {");
     expect(webStyles).toContain("var(--dashboard-panel-min-width");
     expect(webStyles).toContain(".dashboard-panel-card[data-panel-size=\"wide\"]");
     expect(webStyles).toContain(".dashboard-panel-card[data-panel-size=\"tall\"]");
@@ -64,6 +70,13 @@ describe("dashboard workbench layout", () => {
     expect(dashboardHtml).toContain("id=\"plan-form\"");
     expect(dashboardHtml).toContain("id=\"workflow-run\"");
     expect(dashboardHtml).toContain("id=\"cowork-mission-social\"");
+    expect(dashboardHtml).toContain("id=\"dashboard-utility-rail\"");
+    expect(dashboardHtml).toContain("id=\"context-inbox-list\"");
+    expect(dashboardHtml).toContain("id=\"utility-prefill-planner\"");
+    expect(dashboardHtml).toContain("id=\"utility-prefill-mission\"");
+    expect(dashboardHtml).toContain("id=\"utility-prefill-command\"");
+    expect(dashboardHtml).toContain("id=\"context-action-picker\"");
+    expect(dashboardHtml).toContain("data-context-picker-action=\"knowledge.capture\"");
 
     expect(dashboardHtml).not.toContain("id=\"cowork-quick-terminal\"");
     expect(dashboardHtml).not.toContain("id=\"cowork-quick-codex\"");
@@ -92,5 +105,8 @@ describe("dashboard workbench layout", () => {
     expect(dashboardAppSource).not.toContain("terminal-pty");
     expect(dashboardAppSource).not.toContain("workspace-tree");
     expect(dashboardAppSource).not.toContain("git-refresh");
+    expect(dashboardAppSource).not.toContain("data-cowork-command=\"/terminal\"");
+    expect(dashboardAppSource).not.toContain("data-cowork-command=\"/edit\"");
+    expect(dashboardAppSource).not.toContain("data-cowork-command=\"/git\"");
   });
 });
