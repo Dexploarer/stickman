@@ -228,6 +228,104 @@ const getPublicDesktopCommands = () =>
     keywords: Array.isArray(entry.keywords) ? [...entry.keywords] : [],
   }));
 
+const buildStartupFailureHtml = (message) => {
+  const safeMessage = toSafeString(message || "Unknown load error.", 1000)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const safeUrl = toSafeString(appUrl, 500)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Milady Social Suite — Startup Error</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: radial-gradient(circle at 12% -20%, rgba(93, 147, 255, 0.22), transparent 55%), #14171d;
+        color: #eef3ff;
+        display: grid;
+        place-items: center;
+      }
+      .card {
+        width: min(760px, calc(100vw - 48px));
+        border: 1px solid rgba(152, 173, 209, 0.32);
+        border-radius: 14px;
+        background: rgba(16, 20, 30, 0.96);
+        box-shadow: 0 20px 55px rgba(4, 8, 16, 0.55);
+        padding: 18px;
+        display: grid;
+        gap: 12px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.05rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      p { margin: 0; color: #c8d2e8; line-height: 1.45; }
+      code, pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+        background: rgba(10, 14, 22, 0.96);
+        border: 1px solid rgba(120, 142, 176, 0.35);
+        border-radius: 8px;
+      }
+      code { padding: 2px 6px; }
+      pre { margin: 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+      button {
+        border: 1px solid rgba(120, 142, 176, 0.45);
+        border-radius: 999px;
+        background: rgba(26, 34, 48, 0.95);
+        color: #e6eeff;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      button:hover { border-color: #7baeff; background: rgba(31, 47, 74, 0.96); }
+      ol { margin: 0; padding-left: 18px; color: #c8d2e8; display: grid; gap: 6px; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Unable To Load Local Dashboard</h1>
+      <p>The desktop shell could not load <code>${safeUrl}</code>.</p>
+      <pre>${safeMessage}</pre>
+      <ol>
+        <li>Ensure the local server is running on the expected port.</li>
+        <li>If port is busy, launch with a free port via <code>PORT=&lt;port&gt; bun run electron:dev</code>.</li>
+        <li>Click retry after the server is reachable.</li>
+      </ol>
+      <div class="row">
+        <button id="retry">Retry</button>
+      </div>
+    </main>
+    <script>
+      document.getElementById("retry")?.addEventListener("click", () => {
+        window.location.href = ${JSON.stringify(appUrl)};
+      });
+    </script>
+  </body>
+</html>`;
+};
+
+const loadStartupFailurePage = (reason) => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  const html = buildStartupFailureHtml(reason);
+  const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+  mainWindow.loadURL(url).catch(() => {
+    // ignore secondary load errors
+  });
+};
+
 const sendToRenderer = (channel, payload) => {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return false;
@@ -1363,6 +1461,22 @@ const createMainWindow = () => {
     sendDesktopCapabilities();
     sendDesktopPreferences();
     sendToRenderer("pod:desktop-commands", { commands: getPublicDesktopCommands() });
+  });
+
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) {
+      return;
+    }
+    if (errorCode === -3) {
+      return;
+    }
+    const currentUrl = String(validatedURL || "");
+    if (currentUrl.startsWith("data:text/html")) {
+      return;
+    }
+    const reason = `Failed to load ${currentUrl || appUrl} (${errorCode}): ${errorDescription || "unknown error"}`;
+    console.warn(`[electron] ${reason}`);
+    loadStartupFailurePage(reason);
   });
 
   mainWindow.loadURL(appUrl);
