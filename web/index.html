@@ -7,13 +7,17 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@500;700;800&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="ambient"></div>
+    <div id="desktop-drag-region" class="desktop-drag-region hidden" aria-hidden="true">
+      <span class="desktop-drag-title">Prompt or Die Social Suite</span>
+      <span id="desktop-drag-status" class="desktop-drag-status">Desktop shell inactive</span>
+    </div>
     <main class="shell">
       <header class="hero">
         <div class="hero-content">
@@ -882,6 +886,24 @@
         <div class="button-row">
           <button class="ghost" type="button" id="context-picker-cancel">Cancel</button>
         </div>
+      </div>
+    </div>
+
+    <div id="desktop-command-palette" class="dashboard-modal-overlay hidden desktop-command-palette-overlay" aria-hidden="true">
+      <div
+        class="dashboard-modal-card desktop-command-palette-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="desktop-command-palette-title"
+      >
+        <div class="dashboard-modal-head">
+          <h3 id="desktop-command-palette-title">Command Palette</h3>
+          <button class="ghost" type="button" id="desktop-command-palette-close">Close</button>
+        </div>
+        <p class="summary">Menu + keyboard parity for desktop command execution.</p>
+        <input id="desktop-command-search" type="text" placeholder="Search commands..." autocomplete="off" />
+        <div id="desktop-command-hint" class="desktop-command-hint">Use ↑/↓ to navigate and Enter to run.</div>
+        <div id="desktop-command-list" class="desktop-command-list" role="listbox"></div>
       </div>
     </div>
 

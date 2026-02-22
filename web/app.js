@@ -15,6 +15,7 @@ const HISTORY_KEY = "prompt-or-die-social-suite.history.v1";
 const COWORK_CHAT_KEY = "prompt-or-die-social-suite.cowork.chat.v1";
 const MAX_HISTORY = 50;
 const BLUEPRINT_SHELL_MODE = true;
+const BLUEPRINT_WORKBENCH_MODE_KEY = "prompt-or-die-social-suite.blueprint.workbench-mode.v1";
 const DASHBOARD_LAYOUT_KEY = "prompt-or-die-social-suite.dashboard.layout.v1";
 const DASHBOARD_VIEW_KEY = "prompt-or-die-social-suite.dashboard.view.v1";
 const DASHBOARD_CUSTOM_PANELS_KEY = "prompt-or-die-social-suite.dashboard.custom-panels.v1";
@@ -88,9 +89,54 @@ const state = {
   },
   desktopCapabilities: {
     nativeContextMenu: false,
+    nativeMenus: false,
+    commandPalette: false,
+    tray: false,
+    backgroundMode: false,
+    notifications: false,
+    titleBarOverlay: false,
+    platform: "web",
   },
+  desktopCommands: [],
+  desktopPreferences: null,
+  desktopLiveEvents: [],
   dashboardJsonRenderSpec: null,
   dashboardJsonRenderDraft: null,
+};
+
+let runBlueprintCapabilityAction = async () => false;
+
+let applyBlueprintWorkbenchMode = () => {};
+let isBlueprintWorkbenchModeEnabled = () => false;
+
+const DESKTOP_LIVE_EVENT_LIMIT = 40;
+const DESKTOP_COMMAND_LABEL_FALLBACK = "Unknown Command";
+const DESKTOP_COMMAND_ACTION_MAP = Object.freeze({
+  "run.refresh_status": "refresh-status",
+  "run.heartbeat": "run-heartbeat",
+  "context.send": "open-context",
+  "quick.open_antigravity": "open-antigravity",
+  "quick.open_chrome": "open-chrome",
+  "run.social_mission": "run-social-mission",
+  "run.plan": "run-plan",
+  "run.workflow": "run-workflow",
+  "run.ai_chat": "run-ai-chat",
+  "run.ai_image": "run-ai-image",
+  "run.x_algo": "run-x-algo",
+  "tweet.generate": "tweet-generate",
+  "tweet.post": "tweet-post",
+  "watch.active": "watch-active",
+  "integration.dry_run": "integration-dry-run",
+  "integration.execute": "integration-execute",
+  "view.open_onboarding": "open-onboarding",
+  "help.electron_docs": "open-electron-docs",
+});
+
+let desktopPaletteState = {
+  open: false,
+  selectedIndex: 0,
+  query: "",
+  items: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -111,6 +157,265 @@ const parseMaybeJSON = (raw) => {
   } catch {
     return raw;
   }
+};
+
+const normalizeDesktopCapabilities = (raw) => ({
+  nativeContextMenu: Boolean(raw?.nativeContextMenu),
+  nativeMenus: Boolean(raw?.nativeMenus),
+  commandPalette: Boolean(raw?.commandPalette),
+  tray: Boolean(raw?.tray),
+  backgroundMode: Boolean(raw?.backgroundMode),
+  notifications: Boolean(raw?.notifications),
+  titleBarOverlay: Boolean(raw?.titleBarOverlay),
+  platform: String(raw?.platform || "web"),
+});
+
+const normalizeDesktopPreferences = (raw) => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  return {
+    titleBarOverlayMode: String(raw.titleBarOverlayMode || "auto"),
+    backgroundModeEnabled: Boolean(raw.backgroundModeEnabled),
+    notificationsEnabled: Boolean(raw.notificationsEnabled),
+  };
+};
+
+const normalizeDesktopCommand = (entry) => {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return null;
+  }
+  const id = String(entry.id || "").trim();
+  const label = String(entry.label || "").trim();
+  if (!id || !label) {
+    return null;
+  }
+  return {
+    id,
+    label,
+    accelerator: String(entry.accelerator || "").trim(),
+    keywords: Array.isArray(entry.keywords)
+      ? entry.keywords.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean).slice(0, 12)
+      : [],
+  };
+};
+
+const syncDesktopWindowChrome = () => {
+  const overlayEnabled = Boolean(state.desktopCapabilities.titleBarOverlay);
+  document.body.classList.toggle("desktop-titlebar-overlay", overlayEnabled);
+  const dragRegion = $("desktop-drag-region");
+  const dragStatus = $("desktop-drag-status");
+  if (!(dragRegion instanceof HTMLElement)) {
+    return;
+  }
+  dragRegion.classList.toggle("hidden", !overlayEnabled);
+  dragRegion.setAttribute("aria-hidden", overlayEnabled ? "false" : "true");
+  if (dragStatus instanceof HTMLElement) {
+    const mode = state.desktopPreferences?.titleBarOverlayMode || "auto";
+    dragStatus.textContent = `platform: ${state.desktopCapabilities.platform} • titlebar: ${mode}`;
+  }
+};
+
+const renderDesktopNotificationFeed = () => {
+  const node = $("pplx-notification-feed");
+  if (!(node instanceof HTMLElement)) {
+    return;
+  }
+  const latest = state.desktopLiveEvents[0];
+  if (!latest) {
+    node.textContent = "Desktop event feed ready.";
+    return;
+  }
+  const label = String(latest.type || "event").replace(/[_-]+/g, " ").trim();
+  const detail =
+    String(latest.payload?.message || latest.payload?.status || latest.payload?.watchSessionId || latest.payload?.approvalId || "")
+      .trim()
+      .slice(0, 160);
+  node.textContent = detail ? `${label}: ${detail}` : label;
+};
+
+const pushDesktopLiveEvent = (eventRecord) => {
+  if (!eventRecord || typeof eventRecord !== "object") {
+    return;
+  }
+  const id = String(eventRecord.id || `${eventRecord.type}:${eventRecord.ts || Date.now()}`).trim();
+  if (!id) {
+    return;
+  }
+  const deduped = state.desktopLiveEvents.filter((item) => item.id !== id);
+  deduped.unshift({
+    id,
+    type: String(eventRecord.type || "event"),
+    ts: String(eventRecord.ts || new Date().toISOString()),
+    payload: eventRecord.payload && typeof eventRecord.payload === "object" ? eventRecord.payload : {},
+  });
+  state.desktopLiveEvents = deduped.slice(0, DESKTOP_LIVE_EVENT_LIMIT);
+  renderDesktopNotificationFeed();
+};
+
+const scoreDesktopCommand = (command, query) => {
+  if (!query) {
+    return 1;
+  }
+  const normalizedQuery = query.toLowerCase();
+  const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+  const haystack = `${command.label} ${command.id} ${command.keywords.join(" ")}`.toLowerCase();
+  if (!tokens.length) {
+    return 1;
+  }
+  let score = 0;
+  for (const token of tokens) {
+    if (command.id.toLowerCase() === token) {
+      score += 60;
+      continue;
+    }
+    if (command.id.toLowerCase().startsWith(token)) {
+      score += 34;
+      continue;
+    }
+    if (command.label.toLowerCase().startsWith(token)) {
+      score += 26;
+      continue;
+    }
+    if (haystack.includes(token)) {
+      score += 12;
+      continue;
+    }
+    return 0;
+  }
+  return score;
+};
+
+const resolveDesktopPaletteItems = (query) => {
+  const normalized = String(query || "").trim();
+  const rows = [];
+  for (const command of state.desktopCommands) {
+    const score = scoreDesktopCommand(command, normalized);
+    if (!score) {
+      continue;
+    }
+    rows.push({ command, score });
+  }
+  rows.sort((a, b) => b.score - a.score || a.command.label.localeCompare(b.command.label));
+  return rows.map((row) => row.command);
+};
+
+const renderDesktopCommandPalette = () => {
+  const list = $("desktop-command-list");
+  const hint = $("desktop-command-hint");
+  if (!(list instanceof HTMLElement)) {
+    return;
+  }
+  list.innerHTML = "";
+
+  const items = desktopPaletteState.items;
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "desktop-command-item";
+    empty.textContent = "No matching commands.";
+    list.appendChild(empty);
+    if (hint instanceof HTMLElement) {
+      hint.textContent = "No command matches that query.";
+    }
+    return;
+  }
+
+  const selectedIndex = Math.max(0, Math.min(desktopPaletteState.selectedIndex, items.length - 1));
+  desktopPaletteState.selectedIndex = selectedIndex;
+
+  items.forEach((command, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `desktop-command-item${index === selectedIndex ? " active" : ""}`;
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", index === selectedIndex ? "true" : "false");
+    button.dataset.desktopCommandId = command.id;
+
+    const main = document.createElement("span");
+    main.className = "desktop-command-main";
+    const label = document.createElement("span");
+    label.className = "desktop-command-label";
+    label.textContent = command.label || DESKTOP_COMMAND_LABEL_FALLBACK;
+    const meta = document.createElement("span");
+    meta.className = "desktop-command-meta";
+    meta.textContent = command.id;
+    main.append(label, meta);
+
+    button.appendChild(main);
+    if (command.accelerator) {
+      const key = document.createElement("span");
+      key.className = "desktop-command-key";
+      key.textContent = command.accelerator;
+      button.appendChild(key);
+    }
+
+    button.addEventListener("click", async () => {
+      try {
+        await executeDesktopCommand(command.id, { source: "palette_click" });
+      } catch (error) {
+        setBlueprintActionFeedback(error instanceof Error ? error.message : String(error), "error");
+      } finally {
+        closeDesktopCommandPalette();
+      }
+    });
+
+    list.appendChild(button);
+  });
+
+  if (hint instanceof HTMLElement) {
+    hint.textContent = `${items.length} command${items.length === 1 ? "" : "s"} available. Use ↑/↓ and Enter to run.`;
+  }
+};
+
+const openDesktopCommandPalette = (query = "") => {
+  if (!state.desktopCapabilities.commandPalette) {
+    return;
+  }
+  const modal = $("desktop-command-palette");
+  const input = $("desktop-command-search");
+  if (!(modal instanceof HTMLElement) || !(input instanceof HTMLInputElement)) {
+    return;
+  }
+  desktopPaletteState.open = true;
+  desktopPaletteState.query = String(query || "");
+  desktopPaletteState.items = resolveDesktopPaletteItems(desktopPaletteState.query);
+  desktopPaletteState.selectedIndex = 0;
+
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+
+  input.value = desktopPaletteState.query;
+  input.focus();
+  input.select();
+  renderDesktopCommandPalette();
+};
+
+const closeDesktopCommandPalette = () => {
+  const modal = $("desktop-command-palette");
+  if (!(modal instanceof HTMLElement)) {
+    return;
+  }
+  desktopPaletteState.open = false;
+  modal.classList.remove("open");
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+};
+
+const moveDesktopPaletteSelection = (delta) => {
+  if (!desktopPaletteState.items.length) {
+    return;
+  }
+  const next = desktopPaletteState.selectedIndex + delta;
+  const max = desktopPaletteState.items.length - 1;
+  if (next < 0) {
+    desktopPaletteState.selectedIndex = max;
+  } else if (next > max) {
+    desktopPaletteState.selectedIndex = 0;
+  } else {
+    desktopPaletteState.selectedIndex = next;
+  }
+  renderDesktopCommandPalette();
 };
 
 const normalizeDashboardPageId = (value) => {
@@ -1016,7 +1321,7 @@ const syncContextSurfaceAvailability = () => {
   if (modeNode) {
     modeNode.textContent = state.desktopCapabilities.nativeContextMenu
       ? "Native right-click context menu active."
-      : "Web fallback active: use Send Context or Cmd/Ctrl+Shift+K.";
+      : "Web fallback active: use Send Context or Cmd/Ctrl+Shift+K. Palette: Cmd/Ctrl+Shift+P.";
   }
 };
 
@@ -2131,6 +2436,42 @@ const renderBlueprintChatPreview = () => {
   node.textContent = `${role}: ${ellipsizeText(latest.text, 240)}`;
 };
 
+const setBlueprintActionFeedback = (message, tone = "neutral") => {
+  const node = $("pplx-action-feedback");
+  if (!(node instanceof HTMLElement)) {
+    return;
+  }
+  node.textContent = String(message || "").trim() || "Ready.";
+  node.dataset.tone = String(tone || "neutral");
+};
+
+const renderBlueprintCapabilityStatus = () => {
+  const statusNode = $("pplx-capability-status");
+  const healthNode = $("pplx-capability-health");
+  if (!(statusNode instanceof HTMLElement) && !(healthNode instanceof HTMLElement)) {
+    return;
+  }
+  const summary = state.coworkState?.summary || {};
+  const route = String(state.providerStatus?.activeRoute || state.providerStatus?.mode || "unknown");
+  const running = Number(summary.tasks?.running || 0);
+  const queued = Number(summary.tasks?.queued || 0);
+  const approvals = Number(summary.approvals?.total || 0);
+  const watch = Number(summary.watch?.active || 0);
+  const socialReady = Boolean(state.integrations?.readiness?.socialAgentReady);
+  const watchReady = Boolean(state.integrations?.readiness?.watchReady);
+  const livekitConfigured = Boolean(state.livekitStatus?.configured || state.integrations?.livekit?.configured);
+  if (statusNode instanceof HTMLElement) {
+    statusNode.textContent = `route=${route} | tasks=${running}/${queued} | approvals=${approvals} | watch=${watch}`;
+  }
+  if (healthNode instanceof HTMLElement) {
+    healthNode.textContent = [
+      socialReady ? "social:ready" : "social:blocked",
+      watchReady ? "watch:ready" : "watch:blocked",
+      livekitConfigured ? "livekit:on" : "livekit:off",
+    ].join(" • ");
+  }
+};
+
 const initBlueprintShell = () => {
   if (!BLUEPRINT_SHELL_MODE) {
     return;
@@ -2202,9 +2543,80 @@ const initBlueprintShell = () => {
         </div>
       </form>
       <div id="pplx-chat-preview" class="pplx-chat-preview"></div>
+      <section id="pplx-capability-deck" class="pplx-capability-deck" aria-label="Capability deck">
+        <div class="pplx-capability-head">
+          <h3>Operations Deck</h3>
+          <span id="pplx-capability-health" class="pplx-capability-health">loading health…</span>
+        </div>
+        <p id="pplx-capability-status" class="pplx-capability-status">Syncing route, tasks, approvals, and watch state…</p>
+        <div class="pplx-capability-grid">
+          <button type="button" class="pplx-capability-btn" data-pplx-action="refresh-status">Refresh Status</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="run-heartbeat">Run Heartbeat</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="open-context">Send Context</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="open-antigravity">Open Antigravity</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="open-chrome">Open Chrome</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="run-social-mission">Run Social Mission</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="run-plan">Generate Plan</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="run-workflow">Run Workflow</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="run-ai-chat">Run AI Chat</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="run-ai-image">Generate Image</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="run-x-algo">Run X Algo</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="tweet-generate">Draft Tweet</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="tweet-post" data-tone="warn">Post Tweet</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="watch-active">Watch Active Task</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="mint-token">Mint LiveKit Token</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="integration-dry-run">Integration Dry Run</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="integration-execute" data-tone="warn">Integration Execute</button>
+          <button type="button" class="pplx-capability-btn" id="pplx-toggle-workbench" data-pplx-action="toggle-workbench">Open Full Workbench</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="open-onboarding">Reopen Onboarding</button>
+          <button type="button" class="pplx-capability-btn" data-pplx-action="open-electron-docs">Electron UI Docs</button>
+        </div>
+        <div id="pplx-action-feedback" class="pplx-action-feedback" data-tone="neutral">Ready.</div>
+        <div id="pplx-notification-feed" class="pplx-notification-feed">Desktop event feed ready.</div>
+      </section>
     </section>
   `;
   root.appendChild(shell);
+
+  const readWorkbenchMode = () => {
+    try {
+      return window.localStorage.getItem(BLUEPRINT_WORKBENCH_MODE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  };
+
+  const writeWorkbenchMode = (enabled) => {
+    try {
+      if (enabled) {
+        window.localStorage.setItem(BLUEPRINT_WORKBENCH_MODE_KEY, "1");
+      } else {
+        window.localStorage.removeItem(BLUEPRINT_WORKBENCH_MODE_KEY);
+      }
+    } catch {
+      // localStorage may be unavailable
+    }
+  };
+
+  const applyWorkbenchMode = (enabled) => {
+    const isEnabled = Boolean(enabled);
+    root.classList.toggle("blueprint-workbench-mode", isEnabled);
+    const toggleButton = $("pplx-toggle-workbench");
+    if (toggleButton instanceof HTMLButtonElement) {
+      toggleButton.textContent = isEnabled ? "Return to Command Deck" : "Open Full Workbench";
+    }
+    const utilityRail = $("dashboard-utility-rail");
+    if (utilityRail instanceof HTMLElement) {
+      utilityRail.classList.toggle("hidden", !isEnabled);
+    }
+    writeWorkbenchMode(isEnabled);
+    setBlueprintActionFeedback(
+      isEnabled ? "Full workbench mode enabled." : "Command deck mode enabled.",
+      "neutral",
+    );
+  };
+  applyBlueprintWorkbenchMode = applyWorkbenchMode;
+  isBlueprintWorkbenchModeEnabled = () => root.classList.contains("blueprint-workbench-mode");
 
   const navButtons = [...shell.querySelectorAll("[data-pplx-nav]")];
   navButtons.forEach((button) => {
@@ -2213,18 +2625,54 @@ const initBlueprintShell = () => {
       button.classList.add("active");
       const navId = String(button.getAttribute("data-pplx-nav") || "home");
       if (navId === "library") {
+        applyWorkbenchMode(true);
         $("utility-rail-toggle")?.click();
       } else if (navId === "spaces") {
+        applyWorkbenchMode(true);
         $("cowork-mission-query")?.focus();
       } else if (navId === "discover") {
+        applyWorkbenchMode(false);
         const input = $("pplx-composer-input");
         if (input instanceof HTMLTextAreaElement) {
           input.value = "Find current high-signal X trends for AI agents and suggest three post angles.";
           input.focus();
         }
+      } else if (navId === "home") {
+        applyWorkbenchMode(false);
       }
     });
   });
+
+  const seedFromComposer = () => {
+    const node = $("pplx-composer-input");
+    if (node instanceof HTMLTextAreaElement) {
+      const value = String(node.value || "").trim();
+      if (value) {
+        return value;
+      }
+    }
+    return "Find current high-signal X trends for AI agents and suggest three post angles.";
+  };
+
+  const ensureTextareaValue = (id, value) => {
+    const node = $(id);
+    if (!(node instanceof HTMLTextAreaElement)) {
+      return false;
+    }
+    if (!String(node.value || "").trim()) {
+      node.value = value;
+    }
+    return true;
+  };
+
+  const dispatchSubmit = (formId) => {
+    const form = $(formId);
+    if (!(form instanceof HTMLFormElement)) {
+      return false;
+    }
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    return true;
+  };
 
   const runBlueprintSubmit = () => {
     const promptNode = $("pplx-composer-input");
@@ -2259,6 +2707,13 @@ const initBlueprintShell = () => {
 
   $("pplx-send-btn")?.addEventListener("click", () => {
     runBlueprintSubmit();
+  });
+
+  $("pplx-shortcuts")?.addEventListener("click", () => {
+    setBlueprintActionFeedback(
+      "Shortcuts: Cmd/Ctrl+Shift+P palette • Cmd/Ctrl+Enter send task • Cmd/Ctrl+Shift+K send context.",
+      "neutral",
+    );
   });
 
   $("pplx-new-thread")?.addEventListener("click", () => {
@@ -2310,8 +2765,276 @@ const initBlueprintShell = () => {
     });
   });
 
+  const runCapabilityAction = async (actionId) => {
+    const action = String(actionId || "").trim();
+    if (!action) {
+      return;
+    }
+    if (action === "refresh-status") {
+      await Promise.allSettled([
+        refreshProviderStatus(),
+        refreshIntegrations(),
+        refreshCoworkState(),
+        refreshTasks(),
+        refreshApprovals(),
+        refreshLivekitStatus(),
+      ]);
+      renderBlueprintCapabilityStatus();
+      setBlueprintActionFeedback("Status refreshed across provider, integrations, tasks, approvals, and watch.", "success");
+      return;
+    }
+    if (action === "run-heartbeat") {
+      $("heartbeat-run-now")?.click();
+      setBlueprintActionFeedback("Heartbeat run requested.", "neutral");
+      return;
+    }
+    if (action === "open-context") {
+      openContextPicker(contextPayloadFromSelection("blueprint-capability-deck"));
+      setBlueprintActionFeedback("Context picker opened.", "neutral");
+      return;
+    }
+    if (action === "open-antigravity") {
+      const result = await runCoworkQuickAction("open_antigravity");
+      setBlueprintActionFeedback(`Antigravity quick action queued (${result?.task?.id || "task"}).`, "success");
+      return;
+    }
+    if (action === "open-chrome") {
+      const result = await runCoworkQuickAction("open_chrome");
+      setBlueprintActionFeedback(`Chrome quick action queued (${result?.task?.id || "task"}).`, "success");
+      return;
+    }
+    if (action === "run-social-mission") {
+      $("cowork-mission-social")?.click();
+      setBlueprintActionFeedback("Social mission chain requested.", "neutral");
+      return;
+    }
+    if (action === "run-plan") {
+      const seed = seedFromComposer();
+      ensureTextareaValue("plan-goal", seed);
+      dispatchSubmit("plan-form");
+      setBlueprintActionFeedback("Planner request sent.", "neutral");
+      return;
+    }
+    if (action === "run-workflow") {
+      $("workflow-run")?.click();
+      setBlueprintActionFeedback("Workflow run requested.", "neutral");
+      return;
+    }
+    if (action === "run-ai-chat") {
+      ensureTextareaValue("ai-prompt", seedFromComposer());
+      dispatchSubmit("ai-form");
+      setBlueprintActionFeedback("AI chat run requested.", "neutral");
+      return;
+    }
+    if (action === "run-ai-image") {
+      const seed = ($("tweet-text")?.value || "").trim() || seedFromComposer();
+      ensureTextareaValue("ai-image-prompt", seed);
+      dispatchSubmit("ai-image-form");
+      setBlueprintActionFeedback("AI image generation requested.", "neutral");
+      return;
+    }
+    if (action === "run-x-algo") {
+      const seed = ($("tweet-text")?.value || "").trim() || seedFromComposer();
+      ensureTextareaValue("x-algo-draft", seed);
+      dispatchSubmit("x-algo-form");
+      setBlueprintActionFeedback("X algorithm intel run requested.", "neutral");
+      return;
+    }
+    if (action === "tweet-generate") {
+      $("tweet-generate")?.click();
+      setBlueprintActionFeedback("Tweet draft generation requested.", "neutral");
+      return;
+    }
+    if (action === "tweet-post") {
+      ensureTextareaValue("tweet-text", seedFromComposer());
+      dispatchSubmit("tweet-form");
+      setBlueprintActionFeedback("Tweet post requested.", "warning");
+      return;
+    }
+    if (action === "watch-active") {
+      $("cowork-watch-active")?.click();
+      setBlueprintActionFeedback("Watch active task requested.", "neutral");
+      return;
+    }
+    if (action === "mint-token") {
+      $("cowork-watch-token")?.click();
+      setBlueprintActionFeedback("LiveKit token mint requested.", "neutral");
+      return;
+    }
+    if (action === "integration-dry-run") {
+      $("integration-action-dry-run")?.click();
+      setBlueprintActionFeedback("Integration dry run requested.", "neutral");
+      return;
+    }
+    if (action === "integration-execute") {
+      $("integration-action-execute")?.click();
+      setBlueprintActionFeedback("Integration execute requested.", "warning");
+      return;
+    }
+    if (action === "toggle-workbench") {
+      applyWorkbenchMode(!root.classList.contains("blueprint-workbench-mode"));
+      return;
+    }
+    if (action === "open-onboarding") {
+      $("open-onboarding-btn")?.click();
+      setBlueprintActionFeedback("Onboarding panel reopened.", "neutral");
+      return;
+    }
+    if (action === "open-electron-docs") {
+      const docsUrl = "https://www.electronjs.org/docs/latest/tutorial/examples";
+      if (window.podDesktop?.openExternal) {
+        await window.podDesktop.openExternal(docsUrl);
+      } else {
+        window.open(docsUrl, "_blank", "noopener,noreferrer");
+      }
+      setBlueprintActionFeedback("Opened Electron UI examples in browser.", "success");
+      return;
+    }
+    setBlueprintActionFeedback(`Unknown action: ${action}`, "error");
+  };
+  runBlueprintCapabilityAction = runCapabilityAction;
+
+  $("pplx-capability-deck")?.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const button = target.closest("[data-pplx-action]");
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    const action = String(button.dataset.pplxAction || "").trim();
+    if (!action || button.disabled) {
+      return;
+    }
+    button.disabled = true;
+    const original = button.textContent || "";
+    button.textContent = "Running…";
+    try {
+      await runCapabilityAction(action);
+    } catch (error) {
+      setBlueprintActionFeedback(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+      renderBlueprintCapabilityStatus();
+    }
+  });
+
+  applyWorkbenchMode(readWorkbenchMode());
   renderBlueprintThreadList();
   renderBlueprintChatPreview();
+  renderBlueprintCapabilityStatus();
+  renderDesktopNotificationFeed();
+};
+
+const ensureDesktopCommandsLoaded = async () => {
+  if (state.desktopCommands.length) {
+    return state.desktopCommands;
+  }
+  if (!window.podDesktop?.getDesktopCommands) {
+    return state.desktopCommands;
+  }
+  try {
+    const response = await window.podDesktop.getDesktopCommands();
+    const rows = Array.isArray(response?.commands) ? response.commands : [];
+    state.desktopCommands = rows.map(normalizeDesktopCommand).filter(Boolean);
+    return state.desktopCommands;
+  } catch {
+    return state.desktopCommands;
+  }
+};
+
+const executeDesktopCommand = async (commandId, payload = {}) => {
+  const normalizedId = String(commandId || "").trim();
+  const commandPayload = payload && typeof payload === "object" ? payload : {};
+  if (!normalizedId) {
+    return false;
+  }
+
+  if (normalizedId === "system.notice") {
+    const message = String(commandPayload.message || "").trim();
+    if (message) {
+      setBlueprintActionFeedback(message, "neutral");
+    }
+    return true;
+  }
+
+  if (normalizedId === "palette.open") {
+    await ensureDesktopCommandsLoaded();
+    openDesktopCommandPalette("");
+    return true;
+  }
+
+  if (normalizedId === "window.show") {
+    if ($("dashboard-root")?.classList.contains("hidden")) {
+      setOnboardingVisibility(false);
+    }
+    window.focus();
+    const route = String(commandPayload.route || "").trim();
+    if (route === "approvals") {
+      $("approval-id")?.focus();
+    } else if (route === "tasks") {
+      const taskId = String(commandPayload.taskId || "").trim();
+      if ($("task-id") instanceof HTMLInputElement && taskId) {
+        $("task-id").value = taskId;
+      }
+      $("task-id")?.focus();
+    } else if (route === "watch") {
+      const watchSessionId = String(commandPayload.watchSessionId || "").trim();
+      if ($("watch-session-id") instanceof HTMLInputElement && watchSessionId) {
+        $("watch-session-id").value = watchSessionId;
+      }
+      $("watch-session-id")?.focus();
+    }
+    return true;
+  }
+
+  if (normalizedId === "app.new_thread") {
+    $("pplx-new-thread")?.click();
+    return true;
+  }
+
+  if (normalizedId === "context.send") {
+    openContextPicker(contextPayloadFromSelection("desktop-command"));
+    return true;
+  }
+
+  if (normalizedId === "view.toggle_workbench") {
+    if (typeof commandPayload.enabled === "boolean") {
+      applyBlueprintWorkbenchMode(Boolean(commandPayload.enabled));
+      return true;
+    }
+    applyBlueprintWorkbenchMode(!isBlueprintWorkbenchModeEnabled());
+    return true;
+  }
+
+  if (normalizedId === "view.open_onboarding") {
+    $("open-onboarding-btn")?.click();
+    return true;
+  }
+
+  if (normalizedId === "help.electron_docs") {
+    await runBlueprintCapabilityAction("open-electron-docs");
+    return true;
+  }
+
+  if (normalizedId === "app.quit") {
+    if (window.podDesktop?.requestQuit) {
+      await window.podDesktop.requestQuit();
+      return true;
+    }
+    return false;
+  }
+
+  const mappedAction = DESKTOP_COMMAND_ACTION_MAP[normalizedId];
+  if (mappedAction) {
+    await runBlueprintCapabilityAction(mappedAction);
+    return true;
+  }
+
+  setBlueprintActionFeedback(`Unsupported desktop command: ${normalizedId}`, "error");
+  return false;
 };
 
 const recordHistory = (entry) => {
@@ -2406,6 +3129,7 @@ const refreshProviderStatus = async () => {
   state.providerStatus = result?.status || null;
   renderCoworkShellBanner();
   setText("provider-status-output", result);
+  renderBlueprintCapabilityStatus();
   return result;
 };
 
@@ -2415,6 +3139,7 @@ const refreshIntegrations = async () => {
   renderIntegrationBadges();
   renderCoworkShellBanner();
   setText("integrations-output", result);
+  renderBlueprintCapabilityStatus();
   return result;
 };
 
@@ -2574,6 +3299,7 @@ const refreshApprovals = async () => {
     state.approvals = [];
   }
   setText("approvals-output", result);
+  renderBlueprintCapabilityStatus();
   return result;
 };
 
@@ -2634,6 +3360,7 @@ const refreshTasks = async () => {
   }
   renderCoworkTaskBoard();
   setText("tasks-output", result);
+  renderBlueprintCapabilityStatus();
   return result;
 };
 
@@ -2924,6 +3651,7 @@ const refreshCoworkState = async () => {
   renderCoworkShellBanner();
   renderWatchObserverMeta();
   setText("cowork-state-output", result);
+  renderBlueprintCapabilityStatus();
   return result;
 };
 
@@ -3033,6 +3761,7 @@ const refreshMacApps = async () => {
   }
   renderWatchSessionOptions();
   renderWatchObserverMeta();
+  renderBlueprintCapabilityStatus();
   return {
     apps,
     policy,
@@ -3064,6 +3793,7 @@ const refreshLivekitStatus = async () => {
       result?.livekit?.streamMode === "events_and_frames" ? "events_and_frames" : "events_only";
   }
   setText("livekit-output", result);
+  renderBlueprintCapabilityStatus();
   return result;
 };
 
@@ -3234,6 +3964,7 @@ const setOnboardingVisibility = (showOnboarding) => {
   if (!showOnboarding) {
     initBlueprintShell();
   }
+  syncDesktopWindowChrome();
 };
 
 const updatePordieScopeHint = () => {
@@ -4264,8 +4995,72 @@ const bindDashboardEvents = () => {
     }
   });
 
+  $("desktop-command-palette-close")?.addEventListener("click", () => {
+    closeDesktopCommandPalette();
+  });
+
+  $("desktop-command-palette")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target === $("desktop-command-palette")) {
+      closeDesktopCommandPalette();
+    }
+  });
+
+  $("desktop-command-search")?.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    desktopPaletteState.query = String(target.value || "");
+    desktopPaletteState.items = resolveDesktopPaletteItems(desktopPaletteState.query);
+    desktopPaletteState.selectedIndex = 0;
+    renderDesktopCommandPalette();
+  });
+
   document.addEventListener("keydown", (event) => {
-    const openShortcut = (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "k";
+    const normalizedKey = String(event.key || "").toLowerCase();
+    const openPaletteShortcut = (event.metaKey || event.ctrlKey) && event.shiftKey && normalizedKey === "p";
+    if (openPaletteShortcut && state.desktopCapabilities.commandPalette) {
+      event.preventDefault();
+      void ensureDesktopCommandsLoaded().then(() => {
+        openDesktopCommandPalette("");
+      });
+      return;
+    }
+
+    if (desktopPaletteState.open) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDesktopCommandPalette();
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        moveDesktopPaletteSelection(1);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        moveDesktopPaletteSelection(-1);
+        return;
+      }
+      if (event.key === "Enter") {
+        const selected = desktopPaletteState.items[desktopPaletteState.selectedIndex];
+        if (selected?.id) {
+          event.preventDefault();
+          void executeDesktopCommand(selected.id, { source: "palette_enter" })
+            .catch((error) => {
+              setBlueprintActionFeedback(error instanceof Error ? error.message : String(error), "error");
+            })
+            .finally(() => {
+              closeDesktopCommandPalette();
+            });
+        }
+      }
+      return;
+    }
+
+    const openShortcut = (event.metaKey || event.ctrlKey) && event.shiftKey && normalizedKey === "k";
     if (openShortcut) {
       if (state.desktopCapabilities.nativeContextMenu) {
         return;
@@ -4282,6 +5077,39 @@ const bindDashboardEvents = () => {
   if (window.podDesktop?.onContextAction) {
     window.podDesktop.onContextAction((payload) => {
       contextActionRouter(payload);
+    });
+  }
+
+  if (window.podDesktop?.onDesktopCommand) {
+    window.podDesktop.onDesktopCommand((payload) => {
+      const commandId = String(payload.commandId || "").trim();
+      if (!commandId) {
+        return;
+      }
+      void executeDesktopCommand(commandId, payload.payload || {}).catch((error) => {
+        setBlueprintActionFeedback(error instanceof Error ? error.message : String(error), "error");
+      });
+    });
+  }
+
+  if (window.podDesktop?.onDesktopLiveEvent) {
+    window.podDesktop.onDesktopLiveEvent((payload) => {
+      pushDesktopLiveEvent(payload);
+    });
+  }
+
+  if (window.podDesktop?.onDesktopCapabilities) {
+    window.podDesktop.onDesktopCapabilities((payload) => {
+      state.desktopCapabilities = normalizeDesktopCapabilities(payload);
+      syncContextSurfaceAvailability();
+      syncDesktopWindowChrome();
+    });
+  }
+
+  if (window.podDesktop?.onDesktopPreferences) {
+    window.podDesktop.onDesktopPreferences((payload) => {
+      state.desktopPreferences = normalizeDesktopPreferences(payload);
+      syncDesktopWindowChrome();
     });
   }
 
@@ -5666,14 +6494,27 @@ const boot = async () => {
   state.utilityRail = readUtilityRailState();
   if (window.podDesktop?.getDesktopCapabilities) {
     try {
-      const caps = window.podDesktop.getDesktopCapabilities();
-      state.desktopCapabilities = {
-        nativeContextMenu: Boolean(caps?.nativeContextMenu),
-      };
+      const caps = await window.podDesktop.getDesktopCapabilities();
+      state.desktopCapabilities = normalizeDesktopCapabilities(caps);
     } catch {
-      state.desktopCapabilities = {
-        nativeContextMenu: false,
-      };
+      state.desktopCapabilities = normalizeDesktopCapabilities({});
+    }
+  }
+  if (window.podDesktop?.getDesktopPreferences) {
+    try {
+      const prefs = await window.podDesktop.getDesktopPreferences();
+      state.desktopPreferences = normalizeDesktopPreferences(prefs);
+    } catch {
+      state.desktopPreferences = null;
+    }
+  }
+  if (window.podDesktop?.getDesktopCommands) {
+    try {
+      const commandResult = await window.podDesktop.getDesktopCommands();
+      const rows = Array.isArray(commandResult?.commands) ? commandResult.commands : [];
+      state.desktopCommands = rows.map(normalizeDesktopCommand).filter(Boolean);
+    } catch {
+      state.desktopCommands = [];
     }
   }
   renderHistory();
@@ -5683,8 +6524,10 @@ const boot = async () => {
   initDashboardWorkbench();
   renderDashboardJsonRenderStatus();
   renderContextInbox();
+  renderDesktopNotificationFeed();
   syncUtilityRailState();
   syncContextSurfaceAvailability();
+  syncDesktopWindowChrome();
   if (!(($("context-rail-source")?.value || "").trim()) && state.contextInbox[0]?.text) {
     setUtilityRailSourceText(state.contextInbox[0].text);
   }

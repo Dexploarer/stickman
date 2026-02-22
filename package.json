@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "bun src/server.ts",
     "build:server": "bunx tsc --outDir dist",
-    "electron:dev": "electron electron/main.cjs",
+    "electron:dev": "PORT=8788 POD_APP_URL=http://127.0.0.1:8788 OPENROUTER_HTTP_REFERER=http://localhost:8788 electron electron/main.cjs",
     "electron:attach": "POD_ELECTRON_START_SERVER=false electron electron/main.cjs",
     "electron:package:mac": "bun run build:server && bunx electron-builder --mac dmg --publish never -c.asar=false -c.extraMetadata.main=electron/main.cjs -c.mac.identity=null -c.directories.output=dist-installer",
     "lint": "bunx tsc --noEmit",
