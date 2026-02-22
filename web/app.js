@@ -13,13 +13,16 @@ import {
 
 const HISTORY_KEY = "prompt-or-die-social-suite.history.v1";
 const COWORK_CHAT_KEY = "prompt-or-die-social-suite.cowork.chat.v1";
+const COWORK_VIEW_KEY = "prompt-or-die-social-suite.cowork.view.v3";
 const MAX_HISTORY = 50;
-const BLUEPRINT_SHELL_MODE = true;
-const BLUEPRINT_WORKBENCH_MODE_KEY = "prompt-or-die-social-suite.blueprint.workbench-mode.v1";
+const BLUEPRINT_WORKBENCH_MODE_KEY = "prompt-or-die-social-suite.blueprint.workbench-mode.v3";
+const IDE_DOCK_STATE_KEY = "prompt-or-die-social-suite.ide-dock.state.v3";
+const UI_LAYOUT_STATE_KEY = "prompt-or-die-social-suite.ui-layout.v3";
 const DASHBOARD_LAYOUT_KEY = "prompt-or-die-social-suite.dashboard.layout.v1";
 const DASHBOARD_VIEW_KEY = "prompt-or-die-social-suite.dashboard.view.v1";
 const DASHBOARD_CUSTOM_PANELS_KEY = "prompt-or-die-social-suite.dashboard.custom-panels.v1";
 const DASHBOARD_JSON_RENDER_SPEC_KEY = "prompt-or-die-social-suite.dashboard.json-render-spec.v1";
+const APPROVAL_AUTO_APPROVE_KEY = "prompt-or-die-social-suite.approvals.auto-approve.v1";
 const DASHBOARD_MAX_CUSTOM_PANELS = 16;
 const DASHBOARD_PANEL_SIZE_ORDER = ["auto", "wide", "tall", "large"];
 const DASHBOARD_JSON_RENDER_LAYOUTS = ["grid", "stack", "tabs"];
@@ -28,6 +31,44 @@ const DASHBOARD_JSON_RENDER_MAX_PANELS = 12;
 const CONTEXT_INBOX_MAX_ITEMS = 120;
 const CONTEXT_DEFAULT_PREFS = Object.freeze({
   pickerLastAction: "post.append_to_composer",
+});
+const COWORK_VIEW_DEFAULTS = Object.freeze({
+  focusMode: false,
+  showAdvanced: false,
+});
+const IDE_DOCK_CONFIG = Object.freeze({
+  left: {
+    rootId: "ide-left-dock",
+    tabbarId: "ide-left-tabs",
+    defaultPaneId: "runtime-controls-panel",
+  },
+  main: {
+    rootId: "ide-main-dock",
+    tabbarId: "ide-main-tabs",
+    defaultPaneId: "cowork-panel",
+  },
+});
+const UI_ACTIVITY_TABS = Object.freeze([
+  "cowork",
+  "compose",
+  "planner",
+  "integrations",
+  "approvals",
+  "skills",
+  "settings",
+]);
+const UI_CENTER_TABS = Object.freeze([
+  "live_observer",
+  "mission_console",
+  "tweet_composer",
+]);
+const UI_LAYOUT_DEFAULTS = Object.freeze({
+  activeActivityTab: "cowork",
+  activeCenterTab: "live_observer",
+  leftSidebarCollapsed: false,
+  rightInspectorCollapsed: true,
+  bottomRailCollapsed: false,
+  centerSplitRatio: 0.72,
 });
 const DASHBOARD_PAGE_TABS = [
   { id: "operations", label: "Operations" },
@@ -69,6 +110,12 @@ const state = {
   autonomy: null,
   approvals: [],
   coworkMessages: [],
+  coworkView: { ...COWORK_VIEW_DEFAULTS },
+  ideDock: {
+    left: IDE_DOCK_CONFIG.left.defaultPaneId,
+    main: IDE_DOCK_CONFIG.main.defaultPaneId,
+  },
+  uiLayout: { ...UI_LAYOUT_DEFAULTS },
   skills: [],
   tasks: [],
   coworkState: null,
@@ -85,7 +132,7 @@ const state = {
   contextInbox: [],
   contextPrefs: { ...CONTEXT_DEFAULT_PREFS },
   utilityRail: {
-    collapsed: false,
+    collapsed: true,
   },
   desktopCapabilities: {
     nativeContextMenu: false,
@@ -102,15 +149,14 @@ const state = {
   desktopLiveEvents: [],
   dashboardJsonRenderSpec: null,
   dashboardJsonRenderDraft: null,
+  approvalAutoApproveRules: {},
 };
 
 let runBlueprintCapabilityAction = async () => false;
 
-let applyBlueprintWorkbenchMode = () => {};
-let isBlueprintWorkbenchModeEnabled = () => false;
-
 const DESKTOP_LIVE_EVENT_LIMIT = 40;
 const DESKTOP_COMMAND_LABEL_FALLBACK = "Unknown Command";
+const APPROVAL_QUEUED_EVENT_TYPES = new Set(["approval_queued", "code_approval_queued", "skill_approval_queued"]);
 const DESKTOP_COMMAND_ACTION_MAP = Object.freeze({
   "run.refresh_status": "refresh-status",
   "run.heartbeat": "run-heartbeat",
@@ -139,17 +185,19 @@ let desktopPaletteState = {
   items: [],
 };
 
-const $ = (id) => document.getElementById(id);
-
-const setText = (id, value) => {
-  const node = $(id);
-  if (!node) {
-    return;
-  }
-  node.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+const approvalPromptedIds = new Set();
+const approvalAutomationState = {
+  busy: false,
+  rerun: false,
+};
+const approvalModalState = {
+  open: false,
+  approvalId: "",
+  actionKey: "",
+  inFlight: false,
 };
 
-const toJSON = (value) => JSON.stringify(value, null, 2);
+const $ = (id) => document.getElementById(id);
 
 const parseMaybeJSON = (raw) => {
   try {
@@ -158,6 +206,170 @@ const parseMaybeJSON = (raw) => {
     return raw;
   }
 };
+
+const OUTPUT_PRIORITY_KEYS = [
+  "status",
+  "message",
+  "error",
+  "code",
+  "approvalType",
+  "route",
+  "id",
+  "taskId",
+  "watchSessionId",
+  "endpoint",
+  "command",
+  "skillId",
+  "approvalCategory",
+  "count",
+  "total",
+];
+
+const humanizeLabel = (value) =>
+  String(value || "")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (token) => token.toUpperCase());
+
+const compactPreview = (value, max = 160, depth = 0) => {
+  if (value == null) {
+    return "none";
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().replace(/\s+/g, " ");
+    return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) {
+      return "none";
+    }
+    if (depth > 1) {
+      return `${value.length} item${value.length === 1 ? "" : "s"}`;
+    }
+    const sample = value
+      .slice(0, 3)
+      .map((entry) => compactPreview(entry, 48, depth + 1))
+      .filter(Boolean)
+      .join(", ");
+    const suffix = value.length > 3 ? ", …" : "";
+    return `${value.length} item${value.length === 1 ? "" : "s"}: ${sample}${suffix}`;
+  }
+  if (typeof value === "object") {
+    if (depth > 1) {
+      return `${Object.keys(value).length} fields`;
+    }
+    const idLike = [
+      value.id,
+      value.taskId,
+      value.sessionId,
+      value.watchSessionId,
+      value.endpoint,
+      value.command,
+      value.skillId,
+      value.name,
+      value.label,
+    ]
+      .map((entry) => String(entry || "").trim())
+      .find(Boolean);
+    const statusLike = [value.status, value.code, value.reason]
+      .map((entry) => String(entry || "").trim())
+      .find(Boolean);
+    if (idLike && statusLike) {
+      return `${idLike} • ${statusLike}`;
+    }
+    if (idLike) {
+      return idLike;
+    }
+    return `${Object.keys(value).length} fields`;
+  }
+  return String(value);
+};
+
+const summarizeOutputValue = (value, depth = 0) => {
+  if (value == null) {
+    return "No data returned.";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) {
+      return "No items.";
+    }
+    const rows = value.slice(0, 8).map((entry, index) => `${index + 1}. ${compactPreview(entry, 120, depth + 1)}`);
+    if (value.length > 8) {
+      rows.push(`+${value.length - 8} more item${value.length - 8 === 1 ? "" : "s"}.`);
+    }
+    return rows.join("\n");
+  }
+  if (typeof value === "object") {
+    const lines = [];
+    const consumed = new Set();
+    if (Object.prototype.hasOwnProperty.call(value, "ok")) {
+      consumed.add("ok");
+      lines.push(value.ok ? "Status: Completed successfully." : "Status: Action requires attention.");
+    }
+    OUTPUT_PRIORITY_KEYS.forEach((key) => {
+      if (!Object.prototype.hasOwnProperty.call(value, key) || consumed.has(key)) {
+        return;
+      }
+      consumed.add(key);
+      const preview = compactPreview(value[key], 140, depth + 1);
+      if (!preview || preview === "none") {
+        return;
+      }
+      lines.push(`${humanizeLabel(key)}: ${preview}`);
+    });
+    const remaining = Object.entries(value).filter(([key]) => !consumed.has(key));
+    if (remaining.length) {
+      remaining.slice(0, 8).forEach(([key, entry]) => {
+        lines.push(`${humanizeLabel(key)}: ${compactPreview(entry, 140, depth + 1)}`);
+      });
+      if (remaining.length > 8) {
+        lines.push(`More fields: ${remaining.length - 8}`);
+      }
+    }
+    return lines.length ? lines.join("\n") : "Completed.";
+  }
+  return String(value);
+};
+
+const toDisplayText = (value, preferHumanOutput = false) => {
+  if (typeof value !== "string") {
+    return summarizeOutputValue(value);
+  }
+  const trimmed = value.trim();
+  if (!preferHumanOutput) {
+    return value;
+  }
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    const parsed = parseMaybeJSON(trimmed);
+    if (parsed && typeof parsed === "object") {
+      return summarizeOutputValue(parsed);
+    }
+  }
+  return value;
+};
+
+const setText = (id, value) => {
+  const node = $(id);
+  if (!node) {
+    return;
+  }
+  const isOutputSurface = node.tagName === "PRE" || /output/i.test(String(id || ""));
+  if (isOutputSurface) {
+    node.classList.add("output-surface");
+  }
+  node.textContent = toDisplayText(value, isOutputSurface);
+};
+
+const toJSON = (value) => JSON.stringify(value, null, 2);
 
 const normalizeDesktopCapabilities = (raw) => ({
   nativeContextMenu: Boolean(raw?.nativeContextMenu),
@@ -706,13 +918,17 @@ const buildDashboardJsonRenderPrompt = (goal) => {
   ].join("\n");
 };
 
-const buildGeneratedDashboardPanelNode = (element) => {
+const buildGeneratedDashboardPanelNode = (element, index) => {
   const panel = document.createElement("article");
   panel.className = "panel generated-dashboard-panel";
   panel.dataset.generatedWidgetType = String(element.widgetType || "panel");
   panel.dataset.dashboardPage = element.page;
   panel.dataset.dashboardSegment = element.segment;
   panel.dataset.dashboardPanelSize = element.size;
+  const generatedId = `generated-${slugifyPanelId(element.id || element.title || `panel-${index + 1}`)}-${index + 1}`;
+  panel.id = generatedId;
+  panel.dataset.idePane = "true";
+  panel.dataset.ideLabel = String(element.title || `Generated ${index + 1}`).trim();
 
   const title = document.createElement("h2");
   title.textContent = element.title;
@@ -753,10 +969,11 @@ const hydrateGeneratedDashboardPanels = () => {
   if (!spec || !Array.isArray(spec.elements)) {
     return;
   }
-  spec.elements.forEach((element) => {
-    const panel = buildGeneratedDashboardPanelNode(element);
+  spec.elements.forEach((element, index) => {
+    const panel = buildGeneratedDashboardPanelNode(element, index);
     rightColumn.appendChild(panel);
   });
+  refreshIdeDockLayout();
 };
 
 const summarizeDashboardJsonRenderSpec = (spec) => {
@@ -928,7 +1145,7 @@ const writeContextPrefs = () => {
 const readUtilityRailState = () => {
   const parsed = readPersistedJSON(window.localStorage, CONTEXT_STORAGE_KEYS.utilityRail, null);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { collapsed: false };
+    return { collapsed: true };
   }
   return {
     collapsed: Boolean(parsed.collapsed),
@@ -937,6 +1154,307 @@ const readUtilityRailState = () => {
 
 const writeUtilityRailState = () => {
   writePersistedJSON(window.localStorage, CONTEXT_STORAGE_KEYS.utilityRail, state.utilityRail);
+};
+
+const normalizeApprovalAutoApproveRules = (raw) => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const next = {};
+  Object.entries(raw).forEach(([key, value]) => {
+    const normalizedKey = String(key || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .slice(0, 280);
+    if (!normalizedKey) {
+      return;
+    }
+    next[normalizedKey] = Boolean(value);
+  });
+  return next;
+};
+
+const readApprovalAutoApproveRules = () =>
+  normalizeApprovalAutoApproveRules(readPersistedJSON(window.localStorage, APPROVAL_AUTO_APPROVE_KEY, {}));
+
+const writeApprovalAutoApproveRules = () => {
+  writePersistedJSON(window.localStorage, APPROVAL_AUTO_APPROVE_KEY, state.approvalAutoApproveRules);
+};
+
+const isPendingApproval = (item) =>
+  Boolean(item && typeof item === "object" && !Array.isArray(item) && String(item.status || "pending").trim() === "pending");
+
+const listPendingApprovals = () =>
+  (Array.isArray(state.approvals) ? state.approvals : [])
+    .filter(isPendingApproval)
+    .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
+
+const normalizeApprovalActionFragment = (value, max = 220) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .slice(0, max);
+
+const deriveApprovalActionKey = (approval) => {
+  if (!approval || typeof approval !== "object" || Array.isArray(approval)) {
+    return "";
+  }
+  const endpoint = normalizeApprovalActionFragment(approval.endpoint, 220);
+  if (endpoint) {
+    return `x:${endpoint}`;
+  }
+  const command = normalizeApprovalActionFragment(approval.command, 220);
+  if (command) {
+    return `code:${command}`;
+  }
+  const skillId = normalizeApprovalActionFragment(approval.skillId, 160);
+  if (skillId) {
+    const category = normalizeApprovalActionFragment(approval.approvalCategory, 120) || "general";
+    return `skill:${skillId}:${category}`;
+  }
+  return "";
+};
+
+const summarizeApprovalForModal = (approval) => {
+  const id = String(approval?.id || "").trim();
+  const reason = String(approval?.reason || "manual_approval_required").trim() || "manual_approval_required";
+  const expiresAt = String(approval?.expiresAt || "").trim();
+  const actionKey = deriveApprovalActionKey(approval);
+  if (typeof approval?.endpoint === "string" && approval.endpoint.trim()) {
+    const endpoint = approval.endpoint.trim();
+    return {
+      id,
+      actionKey,
+      typeLabel: "X Social action",
+      actionLabel: endpoint,
+      reason,
+      summary: `X endpoint ${endpoint} needs approval.`,
+      details: {
+        endpoint,
+        reason,
+        expiresAt: expiresAt || null,
+        args: approval.args || {},
+        globalArgs: approval.globalArgs || {},
+      },
+    };
+  }
+  if (typeof approval?.command === "string" && approval.command.trim()) {
+    const command = approval.command.trim();
+    const cwd = String(approval?.cwd || "").trim();
+    return {
+      id,
+      actionKey,
+      typeLabel: "Workspace command",
+      actionLabel: command,
+      reason,
+      summary: "A workspace command is waiting for manual approval.",
+      details: {
+        command,
+        cwd: cwd || null,
+        readOnly: Boolean(approval.readOnly),
+        reason,
+        expiresAt: expiresAt || null,
+      },
+    };
+  }
+  if (typeof approval?.skillId === "string" && approval.skillId.trim()) {
+    const skillId = approval.skillId.trim();
+    const category = String(approval?.approvalCategory || "general").trim() || "general";
+    return {
+      id,
+      actionKey,
+      typeLabel: "Skill action",
+      actionLabel: `${skillId} (${category})`,
+      reason,
+      summary: `Skill ${skillId} is requesting ${category} approval.`,
+      details: {
+        skillId,
+        approvalCategory: category,
+        reason,
+        taskId: String(approval?.taskId || "").trim() || null,
+        expiresAt: expiresAt || null,
+        args: approval.args || {},
+      },
+    };
+  }
+  return {
+    id,
+    actionKey,
+    typeLabel: "Agent action",
+    actionLabel: "Unknown action",
+    reason,
+    summary: "An action is waiting for manual approval.",
+    details: approval || {},
+  };
+};
+
+const closeApprovalPromptModal = () => {
+  const modal = $("approval-action-modal");
+  if (!(modal instanceof HTMLElement)) {
+    return;
+  }
+  approvalModalState.open = false;
+  approvalModalState.approvalId = "";
+  approvalModalState.actionKey = "";
+  modal.classList.remove("open");
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+};
+
+const openApprovalPromptModal = (approval) => {
+  const modal = $("approval-action-modal");
+  if (!(modal instanceof HTMLElement)) {
+    return;
+  }
+  const summary = summarizeApprovalForModal(approval);
+  if (!summary.id) {
+    return;
+  }
+  approvalPromptedIds.add(summary.id);
+  approvalModalState.open = true;
+  approvalModalState.approvalId = summary.id;
+  approvalModalState.actionKey = summary.actionKey;
+
+  setText("approval-modal-summary", summary.summary);
+  setText("approval-modal-type", summary.typeLabel);
+  setText("approval-modal-action", summary.actionLabel);
+  setText("approval-modal-reason", summary.reason);
+  setText("approval-modal-details", summary.details);
+  setText(
+    "approval-modal-auto-hint",
+    summary.actionKey ? `Auto-approve scope: ${summary.actionKey}` : "Auto-approve is unavailable for this action type.",
+  );
+
+  if ($("approval-id")) {
+    $("approval-id").value = summary.id;
+  }
+
+  const autoToggle = $("approval-modal-auto-toggle");
+  if (autoToggle instanceof HTMLInputElement) {
+    autoToggle.disabled = !summary.actionKey;
+    autoToggle.checked = summary.actionKey ? Boolean(state.approvalAutoApproveRules[summary.actionKey]) : false;
+  }
+
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+};
+
+const saveApprovalAutoApproveRule = (actionKey, enabled) => {
+  const normalizedKey = normalizeApprovalActionFragment(actionKey, 280);
+  if (!normalizedKey) {
+    return;
+  }
+  if (enabled) {
+    state.approvalAutoApproveRules[normalizedKey] = true;
+  } else {
+    delete state.approvalAutoApproveRules[normalizedKey];
+  }
+  writeApprovalAutoApproveRules();
+};
+
+const isApprovalQueuedLiveEvent = (eventRecord) => APPROVAL_QUEUED_EVENT_TYPES.has(String(eventRecord?.type || "").trim());
+
+const executeApprovalDecision = async (approvalId, decision, options = {}) => {
+  const id = String(approvalId || "").trim();
+  if (!id) {
+    throw new Error("Approval ID is required.");
+  }
+  const normalizedDecision = decision === "reject" ? "reject" : "approve";
+  const result = await apiPost(`/api/agent/approvals/${encodeURIComponent(id)}/${normalizedDecision}`, {});
+  setText("approvals-output", result);
+  await refreshApprovals({ skipAutomation: Boolean(options.skipAutomation) });
+  if (!options.silentLog) {
+    logActivity(normalizedDecision === "approve" ? "Approval executed" : "Approval rejected", {
+      id,
+      ok: result?.ok,
+      source: options.source || "manual",
+    });
+  }
+  return result;
+};
+
+const processApprovalQueue = async () => {
+  if (approvalModalState.inFlight) {
+    return;
+  }
+  const pending = listPendingApprovals();
+  const pendingIds = new Set(
+    pending
+      .map((item) => String(item?.id || "").trim())
+      .filter(Boolean),
+  );
+  for (const id of [...approvalPromptedIds]) {
+    if (!pendingIds.has(id)) {
+      approvalPromptedIds.delete(id);
+    }
+  }
+
+  if (approvalModalState.open && !pendingIds.has(approvalModalState.approvalId)) {
+    closeApprovalPromptModal();
+  }
+
+  for (const approval of pending) {
+    const actionKey = deriveApprovalActionKey(approval);
+    if (!actionKey || !state.approvalAutoApproveRules[actionKey]) {
+      continue;
+    }
+    const id = String(approval?.id || "").trim();
+    if (!id) {
+      continue;
+    }
+    if (approvalModalState.open && approvalModalState.approvalId === id) {
+      closeApprovalPromptModal();
+    }
+    approvalModalState.inFlight = true;
+    try {
+      const result = await executeApprovalDecision(id, "approve", {
+        source: "auto-rule",
+        skipAutomation: true,
+        silentLog: true,
+      });
+      logActivity("Approval auto-approved", { id, actionKey, ok: result?.ok });
+    } catch (error) {
+      logActivity("Approval auto-approve failed", {
+        id,
+        actionKey,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      approvalModalState.inFlight = false;
+    }
+    return processApprovalQueue();
+  }
+
+  if (approvalModalState.open) {
+    return;
+  }
+  const nextPrompt = pending.find((item) => {
+    const id = String(item?.id || "").trim();
+    return Boolean(id) && !approvalPromptedIds.has(id);
+  });
+  if (nextPrompt) {
+    openApprovalPromptModal(nextPrompt);
+  }
+};
+
+const evaluateApprovalQueue = async () => {
+  if (approvalAutomationState.busy) {
+    approvalAutomationState.rerun = true;
+    return;
+  }
+  approvalAutomationState.busy = true;
+  try {
+    await processApprovalQueue();
+  } finally {
+    approvalAutomationState.busy = false;
+    if (approvalAutomationState.rerun) {
+      approvalAutomationState.rerun = false;
+      void evaluateApprovalQueue();
+    }
+  }
 };
 
 const setContextFeedback = (message) => {
@@ -1268,11 +1786,22 @@ const syncUtilityRailState = () => {
   if (!rail) {
     return;
   }
-  rail.classList.toggle("collapsed", Boolean(state.utilityRail.collapsed));
-  rail.setAttribute("aria-hidden", state.utilityRail.collapsed ? "true" : "false");
+  const collapsed = Boolean(state.utilityRail.collapsed);
+  state.uiLayout = {
+    ...normalizeUiLayoutState(state.uiLayout),
+    rightInspectorCollapsed: collapsed,
+  };
+  const root = $("dashboard-root");
+  if (root instanceof HTMLElement) {
+    root.classList.toggle("utility-rail-collapsed", collapsed);
+    root.classList.toggle("ide-right-collapsed", collapsed);
+  }
+  rail.classList.remove("hidden");
+  rail.classList.toggle("collapsed", collapsed);
+  rail.setAttribute("aria-hidden", collapsed ? "true" : "false");
   const toggle = $("utility-rail-toggle");
   if (toggle) {
-    toggle.textContent = state.utilityRail.collapsed ? "Open Rail" : "Collapse";
+    toggle.textContent = collapsed ? "Open Inspector" : "Collapse";
   }
 };
 
@@ -1339,10 +1868,6 @@ const applyDashboardJsonRenderSpec = (spec) => {
 };
 
 const initDashboardWorkbench = () => {
-  if (BLUEPRINT_SHELL_MODE) {
-    initBlueprintShell();
-    return;
-  }
   const root = $("dashboard-root");
   if (!root || root.dataset.workbenchReady === "true") {
     return;
@@ -2299,6 +2824,726 @@ const saveCoworkMessages = () => {
   window.localStorage.setItem(COWORK_CHAT_KEY, JSON.stringify(state.coworkMessages.slice(-120)));
 };
 
+const normalizeCoworkViewState = (candidate) => ({
+  focusMode: typeof candidate?.focusMode === "boolean" ? candidate.focusMode : COWORK_VIEW_DEFAULTS.focusMode,
+  showAdvanced: typeof candidate?.showAdvanced === "boolean" ? candidate.showAdvanced : COWORK_VIEW_DEFAULTS.showAdvanced,
+});
+
+const readCoworkViewState = () => {
+  const raw = window.localStorage.getItem(COWORK_VIEW_KEY);
+  if (!raw) {
+    return { ...COWORK_VIEW_DEFAULTS };
+  }
+  const parsed = parseMaybeJSON(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ...COWORK_VIEW_DEFAULTS };
+  }
+  return normalizeCoworkViewState(parsed);
+};
+
+const writeCoworkViewState = () => {
+  window.localStorage.setItem(COWORK_VIEW_KEY, JSON.stringify(normalizeCoworkViewState(state.coworkView)));
+};
+
+const normalizeIdeDockState = (candidate) => ({
+  left: String(candidate?.left || IDE_DOCK_CONFIG.left.defaultPaneId).trim() || IDE_DOCK_CONFIG.left.defaultPaneId,
+  main: String(candidate?.main || IDE_DOCK_CONFIG.main.defaultPaneId).trim() || IDE_DOCK_CONFIG.main.defaultPaneId,
+});
+
+const readIdeDockState = () => {
+  const raw = window.localStorage.getItem(IDE_DOCK_STATE_KEY);
+  if (!raw) {
+    return normalizeIdeDockState({});
+  }
+  const parsed = parseMaybeJSON(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return normalizeIdeDockState({});
+  }
+  return normalizeIdeDockState(parsed);
+};
+
+const writeIdeDockState = () => {
+  window.localStorage.setItem(IDE_DOCK_STATE_KEY, JSON.stringify(normalizeIdeDockState(state.ideDock)));
+};
+
+const collectIdeDockPanes = (dockRoot) =>
+  [...dockRoot.querySelectorAll(":scope > article[data-ide-pane]")].filter(
+    (node) => node instanceof HTMLElement && String(node.id || "").trim() && node.dataset.ideHidden !== "true",
+  );
+
+const resolveIdeDockKeyFromPane = (pane) => {
+  const dockRoot = pane.closest(".ide-dock");
+  if (!(dockRoot instanceof HTMLElement)) {
+    return "";
+  }
+  if (dockRoot.id === IDE_DOCK_CONFIG.left.rootId) {
+    return "left";
+  }
+  if (dockRoot.id === IDE_DOCK_CONFIG.main.rootId) {
+    return "main";
+  }
+  return "";
+};
+
+const renderIdeDock = (dockKey) => {
+  const config = IDE_DOCK_CONFIG[dockKey];
+  if (!config) {
+    return "";
+  }
+  const dockRoot = $(config.rootId);
+  const tabbar = $(config.tabbarId);
+  if (!(dockRoot instanceof HTMLElement) || !(tabbar instanceof HTMLElement)) {
+    return "";
+  }
+  const panes = collectIdeDockPanes(dockRoot);
+  if (!panes.length) {
+    tabbar.innerHTML = "";
+    return "";
+  }
+
+  const preferred = String(state.ideDock?.[dockKey] || "").trim();
+  const activePane =
+    panes.find((pane) => pane.id === preferred)
+    || panes.find((pane) => pane.id === config.defaultPaneId)
+    || panes[0];
+  const activePaneId = String(activePane?.id || panes[0].id).trim();
+
+  tabbar.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+  panes.forEach((pane) => {
+    const isActive = pane.id === activePaneId;
+    pane.classList.toggle("ide-pane-active", isActive);
+    pane.setAttribute("aria-hidden", isActive ? "false" : "true");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `ghost ide-tab${isActive ? " ide-tab-active" : ""}`;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-controls", pane.id);
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+    button.dataset.ideDock = dockKey;
+    button.dataset.idePaneId = pane.id;
+    const heading = pane.querySelector("h2");
+    const label =
+      String(pane.dataset.ideLabel || "").trim()
+      || (heading instanceof HTMLElement ? String(heading.textContent || "").trim() : "")
+      || humanizeLabel(pane.id.replace(/-panel$/, ""));
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      state.ideDock = normalizeIdeDockState({
+        ...state.ideDock,
+        [dockKey]: pane.id,
+      });
+      refreshIdeDockLayout({ persist: true });
+    });
+    fragment.appendChild(button);
+  });
+  tabbar.appendChild(fragment);
+  return activePaneId;
+};
+
+const refreshIdeDockLayout = ({ persist = false } = {}) => {
+  const next = normalizeIdeDockState(state.ideDock);
+  let changed = false;
+  ["left", "main"].forEach((dockKey) => {
+    const activePaneId = renderIdeDock(dockKey);
+    if (!activePaneId) {
+      return;
+    }
+    if (next[dockKey] !== activePaneId) {
+      next[dockKey] = activePaneId;
+      changed = true;
+    }
+  });
+  state.ideDock = next;
+  if (persist || changed) {
+    writeIdeDockState();
+  }
+};
+
+const setIdeDockPane = (dockKey, paneId, { persist = true } = {}) => {
+  const config = IDE_DOCK_CONFIG[dockKey];
+  if (!config) {
+    return;
+  }
+  state.ideDock = normalizeIdeDockState({
+    ...state.ideDock,
+    [dockKey]: String(paneId || "").trim() || config.defaultPaneId,
+  });
+  refreshIdeDockLayout({ persist });
+};
+
+const revealIdePaneForElement = (target) => {
+  const element = typeof target === "string" ? $(target) : target;
+  if (!(element instanceof HTMLElement)) {
+    return null;
+  }
+  const pane = element.closest("[data-ide-pane]");
+  if (pane instanceof HTMLElement && pane.id) {
+    const dockKey = resolveIdeDockKeyFromPane(pane);
+    if (dockKey) {
+      setIdeDockPane(dockKey, pane.id, { persist: true });
+    }
+  }
+  return element;
+};
+
+const focusDashboardField = (fieldId, { scroll = true } = {}) => {
+  const field = revealIdePaneForElement(fieldId);
+  if (!(field instanceof HTMLElement)) {
+    return;
+  }
+  if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) {
+    field.focus();
+  } else {
+    field.focus?.();
+  }
+  if (scroll) {
+    field.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+};
+
+const normalizeUiLayoutState = (candidate) => {
+  const activity = UI_ACTIVITY_TABS.includes(String(candidate?.activeActivityTab || "").trim())
+    ? String(candidate.activeActivityTab).trim()
+    : UI_LAYOUT_DEFAULTS.activeActivityTab;
+  const center = UI_CENTER_TABS.includes(String(candidate?.activeCenterTab || "").trim())
+    ? String(candidate.activeCenterTab).trim()
+    : UI_LAYOUT_DEFAULTS.activeCenterTab;
+  const ratioRaw = Number(candidate?.centerSplitRatio);
+  const centerSplitRatio = Number.isFinite(ratioRaw)
+    ? Math.max(0.58, Math.min(0.8, ratioRaw))
+    : UI_LAYOUT_DEFAULTS.centerSplitRatio;
+  return {
+    activeActivityTab: activity,
+    activeCenterTab: center,
+    leftSidebarCollapsed: typeof candidate?.leftSidebarCollapsed === "boolean"
+      ? candidate.leftSidebarCollapsed
+      : UI_LAYOUT_DEFAULTS.leftSidebarCollapsed,
+    rightInspectorCollapsed: typeof candidate?.rightInspectorCollapsed === "boolean"
+      ? candidate.rightInspectorCollapsed
+      : UI_LAYOUT_DEFAULTS.rightInspectorCollapsed,
+    bottomRailCollapsed: typeof candidate?.bottomRailCollapsed === "boolean"
+      ? candidate.bottomRailCollapsed
+      : UI_LAYOUT_DEFAULTS.bottomRailCollapsed,
+    centerSplitRatio,
+  };
+};
+
+const readUiLayoutState = () => {
+  const parsed = readPersistedJSON(window.localStorage, UI_LAYOUT_STATE_KEY, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ...UI_LAYOUT_DEFAULTS };
+  }
+  return normalizeUiLayoutState(parsed);
+};
+
+const writeUiLayoutState = () => {
+  writePersistedJSON(window.localStorage, UI_LAYOUT_STATE_KEY, normalizeUiLayoutState(state.uiLayout));
+};
+
+const syncIdeTopbarStatus = () => {
+  const healthChip = $("health-chip");
+  const onboardingChip = $("onboarding-chip");
+  const ideHealth = $("ide-top-health");
+  const ideOnboarding = $("ide-top-onboarding");
+  if (ideHealth instanceof HTMLElement && healthChip instanceof HTMLElement) {
+    ideHealth.textContent = healthChip.textContent || "API: unknown";
+  }
+  if (ideOnboarding instanceof HTMLElement && onboardingChip instanceof HTMLElement) {
+    ideOnboarding.textContent = onboardingChip.textContent || "Onboarding: unknown";
+  }
+};
+
+const ACTIVITY_LEFT_PANES = Object.freeze({
+  cowork: ["task-board-panel", "mac-watch-panel", "recent-runs-panel", "approval-queue-panel"],
+  compose: ["quick-automations-panel", "recent-runs-panel", "runtime-controls-panel"],
+  planner: ["layout-generator-panel", "runtime-controls-panel", "recent-runs-panel"],
+  integrations: ["runtime-controls-panel", "mac-watch-panel"],
+  approvals: ["approval-queue-panel", "task-board-panel", "recent-runs-panel"],
+  skills: ["skill-center-panel", "quick-automations-panel", "recent-runs-panel"],
+  settings: ["runtime-controls-panel", "layout-generator-panel", "mac-watch-panel"],
+});
+
+const CENTER_TAB_TO_PANE = Object.freeze({
+  live_observer: "cowork-panel",
+  mission_console: "planner-panel",
+  tweet_composer: "compose-panel",
+});
+
+const ACTIVITY_MAIN_PANE = Object.freeze({
+  cowork: "",
+  compose: "compose-panel",
+  planner: "planner-panel",
+  integrations: "command-studio-panel",
+  approvals: "cowork-panel",
+  skills: "ai-chat-panel",
+  settings: "x-algo-panel",
+});
+
+const resolveMainPaneForUiLayout = () => {
+  const activity = state.uiLayout.activeActivityTab;
+  if (activity === "cowork") {
+    return CENTER_TAB_TO_PANE[state.uiLayout.activeCenterTab] || "cowork-panel";
+  }
+  return ACTIVITY_MAIN_PANE[activity] || "cowork-panel";
+};
+
+const renderIdeInspectorSummaries = () => {
+  const summary = state.coworkState?.summary || {};
+  const running = Number(summary.tasks?.running || 0);
+  const queued = Number(summary.tasks?.queued || 0);
+  const completed = Number(summary.tasks?.completed || 0);
+  const approvals = Number(summary.approvals?.total || 0);
+  const watch = Number(summary.watch?.active || 0);
+  setText("ide-task-summary", {
+    running,
+    queued,
+    completed,
+    total: Array.isArray(state.tasks) ? state.tasks.length : 0,
+  });
+  setText("ide-approval-summary", {
+    pending: approvals,
+    queue: Array.isArray(state.approvals) ? state.approvals.length : 0,
+  });
+  setText("ide-watch-summary", {
+    active: watch,
+    session: resolveActiveWatchSession() || "none",
+  });
+  setText("ide-provider-summary", {
+    route: state.providerStatus?.activeRoute || state.providerStatus?.mode || "unknown",
+    provider: state.providerStatus?.providerMode || "unknown",
+    socialReady: Boolean(state.integrations?.readiness?.socialAgentReady),
+    watchReady: Boolean(state.integrations?.readiness?.watchReady),
+    livekitConfigured: Boolean(state.livekitStatus?.configured || state.integrations?.livekit?.configured),
+  });
+};
+
+const appendIdeError = (payload) => {
+  const node = $("ide-error-stream");
+  if (!(node instanceof HTMLElement)) {
+    return;
+  }
+  const line = typeof payload === "string" ? payload : toJSON(payload);
+  node.textContent = `${new Date().toLocaleTimeString()} ${line}\n${node.textContent || ""}`.slice(0, 12000);
+};
+
+const initIdeErrorStream = () => {
+  if (window.__podIdeErrorStreamBound) {
+    return;
+  }
+  window.__podIdeErrorStreamBound = true;
+  window.addEventListener("error", (event) => {
+    appendIdeError({
+      type: "error",
+      message: event.message,
+      file: event.filename,
+      line: event.lineno,
+      column: event.colno,
+    });
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    appendIdeError({
+      type: "unhandledrejection",
+      reason: event.reason instanceof Error ? event.reason.message : String(event.reason),
+    });
+  });
+};
+
+const applyUiLayoutState = ({ persist = false } = {}) => {
+  const root = $("dashboard-root");
+  if (!(root instanceof HTMLElement)) {
+    return;
+  }
+  state.uiLayout = normalizeUiLayoutState(state.uiLayout);
+  const current = state.uiLayout;
+  const leftAllowed = new Set(ACTIVITY_LEFT_PANES[current.activeActivityTab] || ACTIVITY_LEFT_PANES.cowork);
+
+  const leftDock = $("ide-left-dock");
+  if (leftDock instanceof HTMLElement) {
+    [...leftDock.querySelectorAll(":scope > article[data-ide-pane]")].forEach((pane) => {
+      if (!(pane instanceof HTMLElement)) {
+        return;
+      }
+      const visible = leftAllowed.has(pane.id);
+      pane.dataset.ideHidden = visible ? "false" : "true";
+      pane.classList.toggle("hidden", !visible);
+      pane.setAttribute("aria-hidden", visible ? "false" : "true");
+    });
+  }
+
+  if (!leftAllowed.has(state.ideDock.left)) {
+    const firstLeft = [...leftAllowed][0] || IDE_DOCK_CONFIG.left.defaultPaneId;
+    setIdeDockPane("left", firstLeft, { persist: false });
+  }
+
+  const mainPaneId = resolveMainPaneForUiLayout();
+  setIdeDockPane("main", mainPaneId, { persist: false });
+  refreshIdeDockLayout();
+
+  root.style.setProperty("--ide-center-ratio", `${Math.round(current.centerSplitRatio * 100)}%`);
+  root.classList.toggle("ide-left-collapsed", current.leftSidebarCollapsed);
+  root.classList.toggle("ide-right-collapsed", current.rightInspectorCollapsed);
+  root.classList.toggle("ide-bottom-collapsed", current.bottomRailCollapsed);
+  root.classList.toggle("ide-center-live", current.activeCenterTab === "live_observer");
+  root.classList.toggle("ide-center-mission", current.activeCenterTab === "mission_console");
+  root.classList.toggle("ide-center-compose", current.activeCenterTab === "tweet_composer");
+  state.utilityRail = {
+    ...state.utilityRail,
+    collapsed: current.rightInspectorCollapsed,
+  };
+  const inspectorRail = $("dashboard-utility-rail");
+  if (inspectorRail instanceof HTMLElement) {
+    inspectorRail.classList.remove("hidden");
+    inspectorRail.classList.toggle("collapsed", current.rightInspectorCollapsed);
+    inspectorRail.setAttribute("aria-hidden", current.rightInspectorCollapsed ? "true" : "false");
+  }
+  const bottomRail = $("ide-bottom-rail");
+  if (bottomRail instanceof HTMLElement) {
+    bottomRail.setAttribute("aria-hidden", current.bottomRailCollapsed ? "true" : "false");
+  }
+
+  const activityButtons = [...document.querySelectorAll("[data-ide-activity]")];
+  activityButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) {
+      return;
+    }
+    button.classList.toggle("active", button.dataset.ideActivity === current.activeActivityTab);
+    button.setAttribute("aria-selected", button.dataset.ideActivity === current.activeActivityTab ? "true" : "false");
+  });
+
+  const centerButtons = [...document.querySelectorAll("[data-ide-center-tab]")];
+  centerButtons.forEach((button) => {
+    if (!(button instanceof HTMLElement)) {
+      return;
+    }
+    button.classList.toggle("active", button.dataset.ideCenterTab === current.activeCenterTab);
+    button.setAttribute("aria-selected", button.dataset.ideCenterTab === current.activeCenterTab ? "true" : "false");
+  });
+
+  const leftToggle = $("ide-toggle-left");
+  const rightToggle = $("ide-toggle-right");
+  const bottomToggle = $("ide-toggle-bottom");
+  if (leftToggle instanceof HTMLButtonElement) {
+    leftToggle.textContent = current.leftSidebarCollapsed ? "Sidebar" : "Hide Sidebar";
+  }
+  if (rightToggle instanceof HTMLButtonElement) {
+    rightToggle.textContent = current.rightInspectorCollapsed ? "Inspector" : "Hide Inspector";
+  }
+  if (bottomToggle instanceof HTMLButtonElement) {
+    bottomToggle.textContent = current.bottomRailCollapsed ? "Output" : "Hide Output";
+  }
+
+  if (persist) {
+    writeUiLayoutState();
+    writeUtilityRailState();
+  }
+};
+
+const setIdeActivityTab = (activityTab, { persist = true } = {}) => {
+  const next = String(activityTab || "").trim();
+  if (!UI_ACTIVITY_TABS.includes(next)) {
+    return;
+  }
+  const current = normalizeUiLayoutState(state.uiLayout);
+  const updated = {
+    ...current,
+    activeActivityTab: next,
+  };
+  if (next === "compose") {
+    updated.activeCenterTab = "tweet_composer";
+  } else if (next === "planner") {
+    updated.activeCenterTab = "mission_console";
+  } else if (next === "cowork" && !UI_CENTER_TABS.includes(updated.activeCenterTab)) {
+    updated.activeCenterTab = "live_observer";
+  }
+  state.uiLayout = updated;
+  applyUiLayoutState({ persist });
+};
+
+const setIdeCenterTab = (centerTab, { persist = true } = {}) => {
+  const next = String(centerTab || "").trim();
+  if (!UI_CENTER_TABS.includes(next)) {
+    return;
+  }
+  state.uiLayout = {
+    ...normalizeUiLayoutState(state.uiLayout),
+    activeActivityTab: "cowork",
+    activeCenterTab: next,
+  };
+  applyUiLayoutState({ persist });
+};
+
+const setIdeActionFeedback = (message, tone = "neutral") => {
+  setBlueprintActionFeedback(message, tone);
+  const contextLine = $("context-feedback-line");
+  if (contextLine instanceof HTMLElement) {
+    contextLine.textContent = String(message || "").trim() || "Context tools ready.";
+    contextLine.dataset.tone = String(tone || "neutral");
+  }
+};
+
+const seedIdePrompt = () => {
+  const candidates = [
+    $("cowork-task-input")?.value,
+    $("tweet-text")?.value,
+    $("plan-goal")?.value,
+    $("ai-prompt")?.value,
+  ];
+  const seed = candidates.find((value) => typeof value === "string" && value.trim());
+  return seed ? String(seed).trim() : "";
+};
+
+const setTextLikeField = (id, value) => {
+  const node = $(id);
+  if (!(node instanceof HTMLInputElement) && !(node instanceof HTMLTextAreaElement)) {
+    return;
+  }
+  node.value = String(value || "");
+};
+
+const submitForm = (id) => {
+  const form = $(id);
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+  form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+};
+
+const runIdeWorkspaceAction = async (actionId) => {
+  const action = String(actionId || "").trim();
+  if (!action) {
+    return;
+  }
+  if (action === "refresh-status") {
+    await Promise.allSettled([
+      refreshProviderStatus(),
+      refreshIntegrations(),
+      refreshCoworkState(),
+      refreshTasks(),
+      refreshApprovals(),
+      refreshLivekitStatus(),
+    ]);
+    renderIdeInspectorSummaries();
+    setIdeActionFeedback("Status refreshed across provider, integrations, tasks, approvals, and watch.", "success");
+    return;
+  }
+  if (action === "run-heartbeat") {
+    setIdeActivityTab("settings", { persist: true });
+    setIdeDockPane("left", "runtime-controls-panel", { persist: true });
+    $("heartbeat-run-now")?.click();
+    setIdeActionFeedback("Heartbeat run requested.", "neutral");
+    return;
+  }
+  if (action === "open-context") {
+    openContextPicker(contextPayloadFromSelection("ide-command"));
+    setIdeActionFeedback("Context picker opened.", "neutral");
+    return;
+  }
+  if (action === "open-antigravity") {
+    const result = await runCoworkQuickAction("open_antigravity");
+    setIdeActivityTab("cowork", { persist: true });
+    setIdeCenterTab("live_observer", { persist: true });
+    setIdeActionFeedback(`Antigravity quick action queued (${result?.task?.id || "task"}).`, "success");
+    return;
+  }
+  if (action === "open-chrome") {
+    const result = await runCoworkQuickAction("open_chrome");
+    setIdeActivityTab("cowork", { persist: true });
+    setIdeCenterTab("live_observer", { persist: true });
+    setIdeActionFeedback(`Chrome quick action queued (${result?.task?.id || "task"}).`, "success");
+    return;
+  }
+  if (action === "run-social-mission") {
+    setIdeCenterTab("live_observer", { persist: true });
+    $("cowork-mission-social")?.click();
+    setIdeActionFeedback("Social mission chain requested.", "neutral");
+    return;
+  }
+  if (action === "run-plan") {
+    setIdeActivityTab("planner", { persist: true });
+    const seed = seedIdePrompt();
+    if (seed && !String($("plan-goal")?.value || "").trim()) {
+      setTextLikeField("plan-goal", seed);
+    }
+    submitForm("plan-form");
+    setIdeActionFeedback("Planner request sent.", "neutral");
+    return;
+  }
+  if (action === "run-workflow") {
+    setIdeActivityTab("planner", { persist: true });
+    $("workflow-run")?.click();
+    setIdeActionFeedback("Workflow run requested.", "neutral");
+    return;
+  }
+  if (action === "run-ai-chat") {
+    setIdeActivityTab("skills", { persist: true });
+    const seed = seedIdePrompt();
+    if (seed && !String($("ai-prompt")?.value || "").trim()) {
+      setTextLikeField("ai-prompt", seed);
+    }
+    submitForm("ai-form");
+    setIdeActionFeedback("AI chat run requested.", "neutral");
+    return;
+  }
+  if (action === "run-ai-image") {
+    setIdeActivityTab("skills", { persist: true });
+    setIdeDockPane("main", "media-copilot-panel", { persist: true });
+    const seed = seedIdePrompt();
+    if (seed && !String($("ai-image-prompt")?.value || "").trim()) {
+      setTextLikeField("ai-image-prompt", seed);
+    }
+    submitForm("ai-image-form");
+    setIdeActionFeedback("AI image generation requested.", "neutral");
+    return;
+  }
+  if (action === "run-x-algo") {
+    setIdeActivityTab("settings", { persist: true });
+    setIdeDockPane("main", "x-algo-panel", { persist: true });
+    const seed = seedIdePrompt();
+    if (seed && !String($("x-algo-draft")?.value || "").trim()) {
+      setTextLikeField("x-algo-draft", seed);
+    }
+    submitForm("x-algo-form");
+    setIdeActionFeedback("X algorithm intel run requested.", "neutral");
+    return;
+  }
+  if (action === "tweet-generate") {
+    setIdeActivityTab("compose", { persist: true });
+    $("tweet-generate")?.click();
+    setIdeActionFeedback("Tweet draft generation requested.", "neutral");
+    return;
+  }
+  if (action === "tweet-post") {
+    setIdeActivityTab("compose", { persist: true });
+    const seed = seedIdePrompt();
+    if (seed && !String($("tweet-text")?.value || "").trim()) {
+      setTextLikeField("tweet-text", seed);
+    }
+    submitForm("tweet-form");
+    setIdeActionFeedback("Tweet post requested.", "warning");
+    return;
+  }
+  if (action === "watch-active") {
+    setIdeCenterTab("live_observer", { persist: true });
+    setIdeDockPane("left", "mac-watch-panel", { persist: true });
+    $("cowork-watch-active")?.click();
+    setIdeActionFeedback("Watch active task requested.", "neutral");
+    return;
+  }
+  if (action === "integration-dry-run") {
+    setIdeActivityTab("integrations", { persist: true });
+    setIdeDockPane("left", "runtime-controls-panel", { persist: true });
+    $("integration-action-dry-run")?.click();
+    setIdeActionFeedback("Integration dry run requested.", "neutral");
+    return;
+  }
+  if (action === "integration-execute") {
+    setIdeActivityTab("integrations", { persist: true });
+    setIdeDockPane("left", "runtime-controls-panel", { persist: true });
+    $("integration-action-execute")?.click();
+    setIdeActionFeedback("Integration execute requested.", "warning");
+    return;
+  }
+  if (action === "open-onboarding") {
+    setOnboardingVisibility(true);
+    setIdeActionFeedback("Onboarding opened.", "neutral");
+    return;
+  }
+  if (action === "open-electron-docs") {
+    const docsUrl = "https://www.electronjs.org/docs/latest/tutorial/examples";
+    if (window.podDesktop?.openExternal) {
+      await window.podDesktop.openExternal(docsUrl);
+    } else {
+      window.open(docsUrl, "_blank", "noopener,noreferrer");
+    }
+    setIdeActionFeedback("Opened Electron UI examples in browser.", "success");
+    return;
+  }
+  setIdeActionFeedback(`Unknown action: ${action}`, "error");
+};
+
+const hasActiveIdeAlerts = () => {
+  const summary = state.coworkState?.summary || {};
+  const running = Number(summary.tasks?.running || 0);
+  const queued = Number(summary.tasks?.queued || 0);
+  const approvals = Number(summary.approvals?.total || (Array.isArray(state.approvals) ? state.approvals.length : 0));
+  const watch = Number(summary.watch?.active || 0);
+  return running > 0 || queued > 0 || approvals > 0 || watch > 0;
+};
+
+const autoCollapseInspectorIfIdle = ({ persist = false } = {}) => {
+  if (hasActiveIdeAlerts()) {
+    return;
+  }
+  const current = normalizeUiLayoutState(state.uiLayout);
+  if (current.rightInspectorCollapsed) {
+    return;
+  }
+  state.uiLayout = {
+    ...current,
+    rightInspectorCollapsed: true,
+  };
+  state.utilityRail = {
+    ...state.utilityRail,
+    collapsed: true,
+  };
+  applyUiLayoutState({ persist });
+};
+
+const initIdeWorkspace = () => {
+  const root = $("dashboard-root");
+  if (!(root instanceof HTMLElement) || root.dataset.ideReady === "true") {
+    return;
+  }
+  root.dataset.ideReady = "true";
+  root.classList.remove("layout");
+  root.classList.add("ide-shell");
+  runBlueprintCapabilityAction = runIdeWorkspaceAction;
+
+  document.querySelectorAll("[data-ide-activity]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const next = String(button.getAttribute("data-ide-activity") || "").trim();
+      setIdeActivityTab(next, { persist: true });
+    });
+  });
+
+  document.querySelectorAll("[data-ide-center-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const next = String(button.getAttribute("data-ide-center-tab") || "").trim();
+      setIdeCenterTab(next, { persist: true });
+    });
+  });
+
+  $("ide-toggle-left")?.addEventListener("click", () => {
+    state.uiLayout = {
+      ...normalizeUiLayoutState(state.uiLayout),
+      leftSidebarCollapsed: !Boolean(state.uiLayout.leftSidebarCollapsed),
+    };
+    applyUiLayoutState({ persist: true });
+  });
+
+  $("ide-toggle-right")?.addEventListener("click", () => {
+    state.uiLayout = {
+      ...normalizeUiLayoutState(state.uiLayout),
+      rightInspectorCollapsed: !Boolean(state.uiLayout.rightInspectorCollapsed),
+    };
+    applyUiLayoutState({ persist: true });
+  });
+
+  $("ide-toggle-bottom")?.addEventListener("click", () => {
+    state.uiLayout = {
+      ...normalizeUiLayoutState(state.uiLayout),
+      bottomRailCollapsed: !Boolean(state.uiLayout.bottomRailCollapsed),
+    };
+    applyUiLayoutState({ persist: true });
+  });
+
+  initIdeErrorStream();
+  syncIdeTopbarStatus();
+  renderIdeInspectorSummaries();
+  applyUiLayoutState({ persist: false });
+};
+
 const addCoworkMessage = (role, text) => {
   state.coworkMessages.push({
     at: timestamp(),
@@ -2408,7 +3653,7 @@ const renderBlueprintThreadList = () => {
   if (!rows.length) {
     const empty = document.createElement("p");
     empty.className = "pplx-thread-empty";
-    empty.textContent = "No threads yet. Ask anything to start.";
+    empty.textContent = "No recent commands yet. Start with Trend Scan or Run Social Mission.";
     list.appendChild(empty);
     return;
   }
@@ -2429,7 +3674,7 @@ const renderBlueprintChatPreview = () => {
   }
   const latest = [...state.coworkMessages].reverse().find((item) => typeof item?.text === "string" && item.text.trim());
   if (!latest) {
-    node.textContent = "Ask anything to run a social mission, build a draft, or capture context.";
+    node.textContent = "Use the starter chips or ask naturally. The deck routes tasks, drafting, monitoring, and context capture.";
     return;
   }
   const role = latest.role === "user" ? "You" : latest.role === "agent" ? "Agent" : "System";
@@ -2445,10 +3690,49 @@ const setBlueprintActionFeedback = (message, tone = "neutral") => {
   node.dataset.tone = String(tone || "neutral");
 };
 
+const applyCoworkViewState = () => {
+  const root = $("dashboard-root");
+  const panel = $("cowork-panel");
+  const focusToggle = $("cowork-focus-toggle");
+  const advancedToggle = $("cowork-advanced-toggle");
+
+  const normalized = normalizeCoworkViewState(state.coworkView);
+  state.coworkView = normalized;
+
+  const focusEnabled = Boolean(normalized.focusMode);
+  if (focusEnabled) {
+    setIdeCenterTab("live_observer", { persist: false });
+  }
+  if (root instanceof HTMLElement) {
+    root.classList.toggle("ide-cowork-focus", focusEnabled);
+  }
+  if (panel instanceof HTMLElement) {
+    panel.classList.toggle("cowork-advanced-visible", Boolean(normalized.showAdvanced));
+  }
+  if (focusToggle instanceof HTMLButtonElement) {
+    focusToggle.textContent = normalized.focusMode ? "Disable Focus Mode" : "Enable Focus Mode";
+  }
+  if (advancedToggle instanceof HTMLButtonElement) {
+    advancedToggle.textContent = normalized.showAdvanced ? "Hide Advanced Panels" : "Show Advanced Panels";
+  }
+};
+
 const renderBlueprintCapabilityStatus = () => {
   const statusNode = $("pplx-capability-status");
   const healthNode = $("pplx-capability-health");
-  if (!(statusNode instanceof HTMLElement) && !(healthNode instanceof HTMLElement)) {
+  const routeNode = $("pplx-kpi-route");
+  const taskNode = $("pplx-kpi-tasks");
+  const approvalsNode = $("pplx-kpi-approvals");
+  const watchNode = $("pplx-kpi-watch");
+  const nextStepNode = $("pplx-next-step");
+  if (
+    !(statusNode instanceof HTMLElement) &&
+    !(healthNode instanceof HTMLElement) &&
+    !(routeNode instanceof HTMLElement) &&
+    !(taskNode instanceof HTMLElement) &&
+    !(approvalsNode instanceof HTMLElement) &&
+    !(watchNode instanceof HTMLElement)
+  ) {
     return;
   }
   const summary = state.coworkState?.summary || {};
@@ -2460,22 +3744,66 @@ const renderBlueprintCapabilityStatus = () => {
   const socialReady = Boolean(state.integrations?.readiness?.socialAgentReady);
   const watchReady = Boolean(state.integrations?.readiness?.watchReady);
   const livekitConfigured = Boolean(state.livekitStatus?.configured || state.integrations?.livekit?.configured);
+  const normalizedRoute = route.replace(/[_-]+/g, " ");
+
+  if (routeNode instanceof HTMLElement) {
+    routeNode.textContent = normalizedRoute;
+  }
+  if (taskNode instanceof HTMLElement) {
+    taskNode.textContent = `${running}/${queued}`;
+  }
+  if (approvalsNode instanceof HTMLElement) {
+    approvalsNode.textContent = String(approvals);
+  }
+  if (watchNode instanceof HTMLElement) {
+    watchNode.textContent = String(watch);
+  }
+
   if (statusNode instanceof HTMLElement) {
-    statusNode.textContent = `route=${route} | tasks=${running}/${queued} | approvals=${approvals} | watch=${watch}`;
+    statusNode.textContent = `Route ${normalizedRoute}. ${running} running, ${queued} queued, ${approvals} approvals, ${watch} active watches.`;
   }
   if (healthNode instanceof HTMLElement) {
-    healthNode.textContent = [
-      socialReady ? "social:ready" : "social:blocked",
-      watchReady ? "watch:ready" : "watch:blocked",
-      livekitConfigured ? "livekit:on" : "livekit:off",
-    ].join(" • ");
+    if (socialReady && watchReady) {
+      healthNode.textContent = livekitConfigured ? "System Ready + LiveKit" : "System Ready";
+      healthNode.dataset.tone = "good";
+    } else if (socialReady || watchReady) {
+      healthNode.textContent = "Partial Setup";
+      healthNode.dataset.tone = "warn";
+    } else {
+      healthNode.textContent = "Needs Setup";
+      healthNode.dataset.tone = "error";
+    }
+  }
+
+  if (nextStepNode instanceof HTMLElement) {
+    if (!socialReady) {
+      nextStepNode.textContent = "Next step: run Refresh Status, then configure social-agent readiness before posting.";
+      nextStepNode.dataset.tone = "warn";
+      return;
+    }
+    if (approvals > 0) {
+      nextStepNode.textContent = `Next step: review ${approvals} pending approval${approvals === 1 ? "" : "s"} in the queue.`;
+      nextStepNode.dataset.tone = "warn";
+      return;
+    }
+    if (running + queued === 0) {
+      nextStepNode.textContent = "Next step: start a social mission or draft from the command starter chips.";
+      nextStepNode.dataset.tone = "neutral";
+      return;
+    }
+    if (!watchReady || watch === 0) {
+      nextStepNode.textContent = "Next step: use Watch Active Task to monitor live execution.";
+      nextStepNode.dataset.tone = "neutral";
+      return;
+    }
+    nextStepNode.textContent = "System is active and monitored. Keep shipping: draft, review, and post.";
+    nextStepNode.dataset.tone = "good";
   }
 };
 
 const initBlueprintShell = () => {
-  if (!BLUEPRINT_SHELL_MODE) {
-    return;
-  }
+  // Legacy command-deck shell is retired; IDE workspace is the only active runtime.
+  return;
   const root = $("dashboard-root");
   if (!(root instanceof HTMLElement) || root.dataset.blueprintShellReady === "true") {
     return;
@@ -2503,13 +3831,27 @@ const initBlueprintShell = () => {
         </div>
         <button type="button" class="pplx-sidebar-toggle" aria-label="Toggle sidebar">⋮</button>
       </div>
-      <button type="button" id="pplx-new-thread" class="pplx-new-thread">New Thread</button>
-      <nav class="pplx-nav">
-        <button type="button" class="pplx-nav-item active" data-pplx-nav="home"><span>⌕</span>Home</button>
-        <button type="button" class="pplx-nav-item" data-pplx-nav="discover"><span>⊕</span>Discover</button>
-        <button type="button" class="pplx-nav-item" data-pplx-nav="spaces"><span>✦</span>Spaces</button>
-        <button type="button" class="pplx-nav-item" data-pplx-nav="library"><span>⌂</span>Library</button>
+      <button type="button" id="pplx-new-thread" class="pplx-new-thread">Clear Chat</button>
+      <nav class="pplx-nav" aria-label="Primary navigation">
+        <button type="button" class="pplx-nav-item active" data-pplx-nav="deck"><span>◎</span>Command Deck</button>
+        <button type="button" class="pplx-nav-item" data-pplx-nav="compose"><span>✎</span>Compose</button>
+        <button type="button" class="pplx-nav-item" data-pplx-nav="missions"><span>✦</span>Missions</button>
+        <button type="button" class="pplx-nav-item" data-pplx-nav="monitor"><span>◍</span>Monitor</button>
+        <button type="button" class="pplx-nav-item" data-pplx-nav="workbench"><span>⌂</span>Workbench</button>
       </nav>
+      <section class="pplx-sidebar-quick" aria-label="Quick launch actions">
+        <h4>Quick Launch</h4>
+        <div class="pplx-sidebar-actions">
+          <button type="button" class="ghost" data-pplx-action-shortcut="run-social-mission">Run Mission</button>
+          <button type="button" class="ghost" data-pplx-action-shortcut="tweet-generate">Draft Tweet</button>
+          <button type="button" class="ghost" data-pplx-action-shortcut="watch-active">Watch Task</button>
+          <button type="button" class="ghost" data-pplx-action-shortcut="refresh-status">Refresh Status</button>
+        </div>
+      </section>
+      <div class="pplx-thread-head">
+        <h4>Recent Commands</h4>
+        <button type="button" class="ghost pplx-thread-refresh" data-pplx-action-shortcut="refresh-status">Refresh</button>
+      </div>
       <div id="pplx-thread-list" class="pplx-thread-list"></div>
       <div class="pplx-sidebar-footer">
         <button type="button" class="pplx-shortcuts">⌘ Shortcuts</button>
@@ -2521,12 +3863,13 @@ const initBlueprintShell = () => {
       </div>
     </aside>
     <section class="pplx-main">
-      <div class="pplx-center-mark" aria-hidden="true">
-        <span>✣</span>
-      </div>
       <form id="pplx-composer-form" class="pplx-composer">
-        <label class="pplx-composer-label" for="pplx-composer-input">Ask anything...</label>
-        <textarea id="pplx-composer-input" rows="1" placeholder="Ask anything..."></textarea>
+        <label class="pplx-composer-label" for="pplx-composer-input">What should we execute next?</label>
+        <textarea
+          id="pplx-composer-input"
+          rows="2"
+          placeholder="Example: pull top AI-agent trends from X, draft 3 posts, and queue the best mission."
+        ></textarea>
         <div class="pplx-composer-row">
           <div class="pplx-composer-left">
             <button class="pplx-mini-btn active" type="button" data-pplx-tool="search" aria-label="Search">⌕</button>
@@ -2542,35 +3885,76 @@ const initBlueprintShell = () => {
           </div>
         </div>
       </form>
+      <div class="pplx-intent-row" aria-label="Prompt starters">
+        <button type="button" class="ghost pplx-intent-chip" data-pplx-intent="trend-scan">Trend Scan</button>
+        <button type="button" class="ghost pplx-intent-chip" data-pplx-intent="thread-draft">Thread Draft</button>
+        <button type="button" class="ghost pplx-intent-chip" data-pplx-intent="reply-campaign">Reply Campaign</button>
+        <button type="button" class="ghost pplx-intent-chip" data-pplx-intent="watch-monitor">Watch + Alerts</button>
+      </div>
       <div id="pplx-chat-preview" class="pplx-chat-preview"></div>
       <section id="pplx-capability-deck" class="pplx-capability-deck" aria-label="Capability deck">
         <div class="pplx-capability-head">
           <h3>Operations Deck</h3>
           <span id="pplx-capability-health" class="pplx-capability-health">loading health…</span>
         </div>
-        <p id="pplx-capability-status" class="pplx-capability-status">Syncing route, tasks, approvals, and watch state…</p>
-        <div class="pplx-capability-grid">
-          <button type="button" class="pplx-capability-btn" data-pplx-action="refresh-status">Refresh Status</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="run-heartbeat">Run Heartbeat</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="open-context">Send Context</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="open-antigravity">Open Antigravity</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="open-chrome">Open Chrome</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="run-social-mission">Run Social Mission</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="run-plan">Generate Plan</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="run-workflow">Run Workflow</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="run-ai-chat">Run AI Chat</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="run-ai-image">Generate Image</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="run-x-algo">Run X Algo</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="tweet-generate">Draft Tweet</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="tweet-post" data-tone="warn">Post Tweet</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="watch-active">Watch Active Task</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="mint-token">Mint LiveKit Token</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="integration-dry-run">Integration Dry Run</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="integration-execute" data-tone="warn">Integration Execute</button>
-          <button type="button" class="pplx-capability-btn" id="pplx-toggle-workbench" data-pplx-action="toggle-workbench">Open Full Workbench</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="open-onboarding">Reopen Onboarding</button>
-          <button type="button" class="pplx-capability-btn" data-pplx-action="open-electron-docs">Electron UI Docs</button>
+        <div id="pplx-kpi-grid" class="pplx-kpi-grid">
+          <article class="pplx-kpi-card">
+            <small>Route</small>
+            <strong id="pplx-kpi-route">--</strong>
+          </article>
+          <article class="pplx-kpi-card">
+            <small>Tasks</small>
+            <strong id="pplx-kpi-tasks">0/0</strong>
+          </article>
+          <article class="pplx-kpi-card">
+            <small>Approvals</small>
+            <strong id="pplx-kpi-approvals">0</strong>
+          </article>
+          <article class="pplx-kpi-card">
+            <small>Watch</small>
+            <strong id="pplx-kpi-watch">0</strong>
+          </article>
         </div>
+        <p id="pplx-next-step" class="pplx-next-step">Syncing readiness and recommending the next step…</p>
+        <p id="pplx-capability-status" class="pplx-capability-status">Syncing route, tasks, approvals, and watch state…</p>
+
+        <div class="pplx-capability-section">
+          <h4>Primary Flow</h4>
+          <div class="pplx-capability-grid pplx-capability-grid-primary">
+            <button type="button" class="pplx-capability-btn" data-pplx-action="refresh-status">Refresh Status</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="run-social-mission">Run Social Mission</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="open-context">Send Context</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="watch-active">Watch Active Task</button>
+            <button type="button" class="pplx-capability-btn" id="pplx-toggle-workbench" data-pplx-action="toggle-workbench">Open Full Workbench</button>
+          </div>
+        </div>
+
+        <div class="pplx-capability-section">
+          <h4>Create</h4>
+          <div class="pplx-capability-grid">
+            <button type="button" class="pplx-capability-btn" data-pplx-action="tweet-generate">Draft Tweet</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="run-plan">Generate Plan</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="run-workflow">Run Workflow</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="run-ai-chat">Run AI Chat</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="run-ai-image">Generate Image</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="run-x-algo">Run X Algo</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="tweet-post" data-tone="warn">Post Tweet</button>
+          </div>
+        </div>
+
+        <details class="pplx-capability-section pplx-capability-advanced">
+          <summary>Advanced Controls</summary>
+          <div class="pplx-capability-grid">
+            <button type="button" class="pplx-capability-btn" data-pplx-action="run-heartbeat">Run Heartbeat</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="open-antigravity">Open Antigravity</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="open-chrome">Open Chrome</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="mint-token">Mint LiveKit Token</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="integration-dry-run">Integration Dry Run</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="integration-execute" data-tone="warn">Integration Execute</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="open-onboarding">Reopen Onboarding</button>
+            <button type="button" class="pplx-capability-btn" data-pplx-action="open-electron-docs">Electron UI Docs</button>
+          </div>
+        </details>
         <div id="pplx-action-feedback" class="pplx-action-feedback" data-tone="neutral">Ready.</div>
         <div id="pplx-notification-feed" class="pplx-notification-feed">Desktop event feed ready.</div>
       </section>
@@ -2580,9 +3964,13 @@ const initBlueprintShell = () => {
 
   const readWorkbenchMode = () => {
     try {
-      return window.localStorage.getItem(BLUEPRINT_WORKBENCH_MODE_KEY) === "1";
+      const stored = window.localStorage.getItem(BLUEPRINT_WORKBENCH_MODE_KEY);
+      if (stored == null) {
+        return true;
+      }
+      return stored === "1";
     } catch {
-      return false;
+      return true;
     }
   };
 
@@ -2610,35 +3998,61 @@ const initBlueprintShell = () => {
       utilityRail.classList.toggle("hidden", !isEnabled);
     }
     writeWorkbenchMode(isEnabled);
+    if (isEnabled) {
+      refreshIdeDockLayout();
+    }
     setBlueprintActionFeedback(
       isEnabled ? "Full workbench mode enabled." : "Command deck mode enabled.",
       "neutral",
     );
+    applyCoworkViewState();
   };
-  applyBlueprintWorkbenchMode = applyWorkbenchMode;
-  isBlueprintWorkbenchModeEnabled = () => root.classList.contains("blueprint-workbench-mode");
+  const sidebarToggle = shell.querySelector(".pplx-sidebar-toggle");
+  if (sidebarToggle instanceof HTMLButtonElement) {
+    sidebarToggle.addEventListener("click", () => {
+      const collapsed = shell.classList.toggle("pplx-sidebar-collapsed");
+      sidebarToggle.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+      sidebarToggle.textContent = collapsed ? "≡" : "⋮";
+    });
+  }
 
   const navButtons = [...shell.querySelectorAll("[data-pplx-nav]")];
   navButtons.forEach((button) => {
     button.addEventListener("click", () => {
       navButtons.forEach((entry) => entry.classList.remove("active"));
       button.classList.add("active");
-      const navId = String(button.getAttribute("data-pplx-nav") || "home");
-      if (navId === "library") {
+      const navId = String(button.getAttribute("data-pplx-nav") || "deck");
+      if (navId === "compose") {
         applyWorkbenchMode(true);
-        $("utility-rail-toggle")?.click();
-      } else if (navId === "spaces") {
+        setIdeDockPane("main", "compose-panel", { persist: true });
+        focusDashboardField("tweet-text");
+        return;
+      }
+      if (navId === "missions") {
         applyWorkbenchMode(true);
-        $("cowork-mission-query")?.focus();
-      } else if (navId === "discover") {
-        applyWorkbenchMode(false);
-        const input = $("pplx-composer-input");
-        if (input instanceof HTMLTextAreaElement) {
-          input.value = "Find current high-signal X trends for AI agents and suggest three post angles.";
-          input.focus();
-        }
-      } else if (navId === "home") {
-        applyWorkbenchMode(false);
+        setIdeDockPane("main", "cowork-panel", { persist: true });
+        focusDashboardField("cowork-mission-query");
+        return;
+      }
+      if (navId === "monitor") {
+        applyWorkbenchMode(true);
+        setIdeDockPane("main", "cowork-panel", { persist: true });
+        setIdeDockPane("left", "mac-watch-panel", { persist: true });
+        $("cowork-live-refresh")?.click();
+        focusDashboardField("watch-session-id");
+        return;
+      }
+      if (navId === "workbench") {
+        applyWorkbenchMode(true);
+        setIdeDockPane("main", "cowork-panel", { persist: true });
+        setIdeDockPane("left", "task-board-panel", { persist: true });
+        focusDashboardField("task-prompt");
+        return;
+      }
+      applyWorkbenchMode(false);
+      const input = $("pplx-composer-input");
+      if (input instanceof HTMLTextAreaElement) {
+        input.focus();
       }
     });
   });
@@ -2670,6 +4084,7 @@ const initBlueprintShell = () => {
     if (!(form instanceof HTMLFormElement)) {
       return false;
     }
+    revealIdePaneForElement(form);
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     return true;
   };
@@ -2680,6 +4095,7 @@ const initBlueprintShell = () => {
     if (!task) {
       return;
     }
+    setIdeDockPane("main", "cowork-panel", { persist: true });
     const taskInput = $("cowork-task-input");
     if (taskInput instanceof HTMLTextAreaElement) {
       taskInput.value = task;
@@ -2707,6 +4123,25 @@ const initBlueprintShell = () => {
 
   $("pplx-send-btn")?.addEventListener("click", () => {
     runBlueprintSubmit();
+  });
+
+  const intentPrompts = {
+    "trend-scan": "Find current high-signal X trends for AI agents and suggest three post angles.",
+    "thread-draft": "Draft a 6-post X thread about today's strongest agent trend, with hooks and CTAs.",
+    "reply-campaign": "Create a reply strategy for 10 relevant AI-agent posts and draft concise responses.",
+    "watch-monitor": "Monitor active tasks and alert me when approvals or watch sessions need action.",
+  };
+  shell.querySelectorAll("[data-pplx-intent]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const intentId = String(node.getAttribute("data-pplx-intent") || "").trim();
+      const prompt = intentPrompts[intentId] || intentPrompts["trend-scan"];
+      const input = $("pplx-composer-input");
+      if (input instanceof HTMLTextAreaElement) {
+        input.value = prompt;
+        input.focus();
+      }
+      setBlueprintActionFeedback(`Loaded starter: ${intentId.replace(/-/g, " ")}.`, "neutral");
+    });
   });
 
   $("pplx-shortcuts")?.addEventListener("click", () => {
@@ -2756,11 +4191,13 @@ const initBlueprintShell = () => {
       if (toolId === "attach") {
         openContextPicker(contextPayloadFromSelection("blueprint-toolbar"));
       } else if (toolId === "web") {
-        $("workflow-run")?.focus();
+        setIdeDockPane("main", "planner-panel", { persist: true });
+        focusDashboardField("workflow-run");
       } else if (toolId === "model") {
         $("provider-refresh")?.click();
       } else if (toolId === "voice") {
-        $("ai-form")?.scrollIntoView({ block: "center", behavior: "smooth" });
+        setIdeDockPane("main", "ai-chat-panel", { persist: true });
+        focusDashboardField("ai-prompt");
       }
     });
   });
@@ -2784,6 +4221,7 @@ const initBlueprintShell = () => {
       return;
     }
     if (action === "run-heartbeat") {
+      setIdeDockPane("left", "runtime-controls-panel", { persist: true });
       $("heartbeat-run-now")?.click();
       setBlueprintActionFeedback("Heartbeat run requested.", "neutral");
       return;
@@ -2804,11 +4242,13 @@ const initBlueprintShell = () => {
       return;
     }
     if (action === "run-social-mission") {
+      setIdeDockPane("main", "cowork-panel", { persist: true });
       $("cowork-mission-social")?.click();
       setBlueprintActionFeedback("Social mission chain requested.", "neutral");
       return;
     }
     if (action === "run-plan") {
+      setIdeDockPane("main", "planner-panel", { persist: true });
       const seed = seedFromComposer();
       ensureTextareaValue("plan-goal", seed);
       dispatchSubmit("plan-form");
@@ -2816,17 +4256,20 @@ const initBlueprintShell = () => {
       return;
     }
     if (action === "run-workflow") {
+      setIdeDockPane("main", "planner-panel", { persist: true });
       $("workflow-run")?.click();
       setBlueprintActionFeedback("Workflow run requested.", "neutral");
       return;
     }
     if (action === "run-ai-chat") {
+      setIdeDockPane("main", "ai-chat-panel", { persist: true });
       ensureTextareaValue("ai-prompt", seedFromComposer());
       dispatchSubmit("ai-form");
       setBlueprintActionFeedback("AI chat run requested.", "neutral");
       return;
     }
     if (action === "run-ai-image") {
+      setIdeDockPane("main", "media-copilot-panel", { persist: true });
       const seed = ($("tweet-text")?.value || "").trim() || seedFromComposer();
       ensureTextareaValue("ai-image-prompt", seed);
       dispatchSubmit("ai-image-form");
@@ -2834,6 +4277,7 @@ const initBlueprintShell = () => {
       return;
     }
     if (action === "run-x-algo") {
+      setIdeDockPane("main", "x-algo-panel", { persist: true });
       const seed = ($("tweet-text")?.value || "").trim() || seedFromComposer();
       ensureTextareaValue("x-algo-draft", seed);
       dispatchSubmit("x-algo-form");
@@ -2841,32 +4285,39 @@ const initBlueprintShell = () => {
       return;
     }
     if (action === "tweet-generate") {
+      setIdeDockPane("main", "compose-panel", { persist: true });
       $("tweet-generate")?.click();
       setBlueprintActionFeedback("Tweet draft generation requested.", "neutral");
       return;
     }
     if (action === "tweet-post") {
+      setIdeDockPane("main", "compose-panel", { persist: true });
       ensureTextareaValue("tweet-text", seedFromComposer());
       dispatchSubmit("tweet-form");
       setBlueprintActionFeedback("Tweet post requested.", "warning");
       return;
     }
     if (action === "watch-active") {
+      setIdeDockPane("main", "cowork-panel", { persist: true });
+      setIdeDockPane("left", "mac-watch-panel", { persist: true });
       $("cowork-watch-active")?.click();
       setBlueprintActionFeedback("Watch active task requested.", "neutral");
       return;
     }
     if (action === "mint-token") {
+      setIdeDockPane("left", "mac-watch-panel", { persist: true });
       $("cowork-watch-token")?.click();
       setBlueprintActionFeedback("LiveKit token mint requested.", "neutral");
       return;
     }
     if (action === "integration-dry-run") {
+      setIdeDockPane("left", "runtime-controls-panel", { persist: true });
       $("integration-action-dry-run")?.click();
       setBlueprintActionFeedback("Integration dry run requested.", "neutral");
       return;
     }
     if (action === "integration-execute") {
+      setIdeDockPane("left", "runtime-controls-panel", { persist: true });
       $("integration-action-execute")?.click();
       setBlueprintActionFeedback("Integration execute requested.", "warning");
       return;
@@ -2893,6 +4344,20 @@ const initBlueprintShell = () => {
     setBlueprintActionFeedback(`Unknown action: ${action}`, "error");
   };
   runBlueprintCapabilityAction = runCapabilityAction;
+
+  shell.querySelectorAll("[data-pplx-action-shortcut]").forEach((node) => {
+    node.addEventListener("click", async () => {
+      const action = String(node.getAttribute("data-pplx-action-shortcut") || "").trim();
+      if (!action) {
+        return;
+      }
+      try {
+        await runCapabilityAction(action);
+      } catch (error) {
+        setBlueprintActionFeedback(error instanceof Error ? error.message : String(error), "error");
+      }
+    });
+  });
 
   $("pplx-capability-deck")?.addEventListener("click", async (event) => {
     const target = event.target;
@@ -2955,7 +4420,7 @@ const executeDesktopCommand = async (commandId, payload = {}) => {
   if (normalizedId === "system.notice") {
     const message = String(commandPayload.message || "").trim();
     if (message) {
-      setBlueprintActionFeedback(message, "neutral");
+      setIdeActionFeedback(message, "neutral");
     }
     return true;
   }
@@ -2973,25 +4438,37 @@ const executeDesktopCommand = async (commandId, payload = {}) => {
     window.focus();
     const route = String(commandPayload.route || "").trim();
     if (route === "approvals") {
-      $("approval-id")?.focus();
+      setIdeActivityTab("approvals", { persist: true });
+      setIdeDockPane("left", "approval-queue-panel", { persist: true });
+      focusDashboardField("approval-id");
     } else if (route === "tasks") {
+      setIdeActivityTab("cowork", { persist: true });
+      setIdeDockPane("left", "task-board-panel", { persist: true });
       const taskId = String(commandPayload.taskId || "").trim();
       if ($("task-id") instanceof HTMLInputElement && taskId) {
         $("task-id").value = taskId;
       }
-      $("task-id")?.focus();
+      focusDashboardField("task-id");
     } else if (route === "watch") {
+      setIdeCenterTab("live_observer", { persist: true });
+      setIdeDockPane("left", "mac-watch-panel", { persist: true });
       const watchSessionId = String(commandPayload.watchSessionId || "").trim();
       if ($("watch-session-id") instanceof HTMLInputElement && watchSessionId) {
         $("watch-session-id").value = watchSessionId;
       }
-      $("watch-session-id")?.focus();
+      focusDashboardField("watch-session-id");
+    } else if (route && UI_ACTIVITY_TABS.includes(route)) {
+      setIdeActivityTab(route, { persist: true });
     }
     return true;
   }
 
   if (normalizedId === "app.new_thread") {
-    $("pplx-new-thread")?.click();
+    state.coworkMessages = [];
+    saveCoworkMessages();
+    renderCoworkChat();
+    addCoworkMessage("system", "Chat session reset.");
+    setIdeCenterTab("live_observer", { persist: true });
     return true;
   }
 
@@ -3001,11 +4478,7 @@ const executeDesktopCommand = async (commandId, payload = {}) => {
   }
 
   if (normalizedId === "view.toggle_workbench") {
-    if (typeof commandPayload.enabled === "boolean") {
-      applyBlueprintWorkbenchMode(Boolean(commandPayload.enabled));
-      return true;
-    }
-    applyBlueprintWorkbenchMode(!isBlueprintWorkbenchModeEnabled());
+    setIdeCenterTab("live_observer", { persist: true });
     return true;
   }
 
@@ -3033,7 +4506,7 @@ const executeDesktopCommand = async (commandId, payload = {}) => {
     return true;
   }
 
-  setBlueprintActionFeedback(`Unsupported desktop command: ${normalizedId}`, "error");
+  setIdeActionFeedback(`Unsupported desktop command: ${normalizedId}`, "error");
   return false;
 };
 
@@ -3130,6 +4603,7 @@ const refreshProviderStatus = async () => {
   renderCoworkShellBanner();
   setText("provider-status-output", result);
   renderBlueprintCapabilityStatus();
+  renderIdeInspectorSummaries();
   return result;
 };
 
@@ -3140,6 +4614,7 @@ const refreshIntegrations = async () => {
   renderCoworkShellBanner();
   setText("integrations-output", result);
   renderBlueprintCapabilityStatus();
+  renderIdeInspectorSummaries();
   return result;
 };
 
@@ -3284,7 +4759,7 @@ const refreshAutonomy = async () => {
   return result;
 };
 
-const refreshApprovals = async () => {
+const refreshApprovals = async (options = {}) => {
   const result = await apiGet("/api/agent/approvals");
   const approvals = result?.approvals;
   if (Array.isArray(approvals)) {
@@ -3300,6 +4775,10 @@ const refreshApprovals = async () => {
   }
   setText("approvals-output", result);
   renderBlueprintCapabilityStatus();
+  renderIdeInspectorSummaries();
+  if (!options.skipAutomation) {
+    void evaluateApprovalQueue();
+  }
   return result;
 };
 
@@ -3361,6 +4840,7 @@ const refreshTasks = async () => {
   renderCoworkTaskBoard();
   setText("tasks-output", result);
   renderBlueprintCapabilityStatus();
+  renderIdeInspectorSummaries();
   return result;
 };
 
@@ -3652,6 +5132,7 @@ const refreshCoworkState = async () => {
   renderWatchObserverMeta();
   setText("cowork-state-output", result);
   renderBlueprintCapabilityStatus();
+  renderIdeInspectorSummaries();
   return result;
 };
 
@@ -3762,6 +5243,7 @@ const refreshMacApps = async () => {
   renderWatchSessionOptions();
   renderWatchObserverMeta();
   renderBlueprintCapabilityStatus();
+  renderIdeInspectorSummaries();
   return {
     apps,
     policy,
@@ -3958,11 +5440,11 @@ const getGlobalArgs = () => {
 
 const setOnboardingVisibility = (showOnboarding) => {
   $("onboarding-root")?.classList.toggle("hidden", !showOnboarding);
-  $("dashboard-root")?.classList.toggle("hidden", showOnboarding);
-  document.body.classList.toggle("dashboard-visible", !showOnboarding);
+  $("dashboard-root")?.classList.remove("hidden");
+  document.body.classList.toggle("dashboard-visible", true);
   document.body.classList.toggle("onboarding-visible", Boolean(showOnboarding));
   if (!showOnboarding) {
-    initBlueprintShell();
+    initIdeWorkspace();
   }
   syncDesktopWindowChrome();
 };
@@ -4603,12 +6085,14 @@ const refreshOnboardingState = async () => {
   const completed = Boolean(state.onboarding?.completed);
   setOnboardingVisibility(!completed);
   $("onboarding-chip").textContent = completed ? "Onboarding: complete" : "Onboarding: required";
+  syncIdeTopbarStatus();
 };
 
 const refreshHealth = async () => {
   const data = await apiGet("/api/health");
   $("health-chip").textContent = data.ok ? "API: online" : "API: offline";
   $("onboarding-chip").textContent = data.onboardingCompleted ? "Onboarding: complete" : "Onboarding: required";
+  syncIdeTopbarStatus();
   logActivity("Health check", data);
 };
 
@@ -4803,6 +6287,7 @@ const bindOnboardingEvents = () => {
       fillOnboardingForm();
       setOnboardingVisibility(false);
       $("onboarding-chip").textContent = "Onboarding: complete";
+      syncIdeTopbarStatus();
       setText("onb-persona-output", result);
       if (result.exported) {
         setText("onb-pordie-output", result.exported);
@@ -4839,8 +6324,14 @@ const bindDashboardEvents = () => {
       ...state.utilityRail,
       collapsed: !state.utilityRail.collapsed,
     };
+    state.uiLayout = {
+      ...normalizeUiLayoutState(state.uiLayout),
+      rightInspectorCollapsed: state.utilityRail.collapsed,
+    };
     writeUtilityRailState();
+    writeUiLayoutState();
     syncUtilityRailState();
+    applyUiLayoutState({ persist: false });
   });
 
   $("utility-source-use-selection")?.addEventListener("click", () => {
@@ -5006,6 +6497,63 @@ const bindDashboardEvents = () => {
     }
   });
 
+  $("approval-modal-close")?.addEventListener("click", () => {
+    closeApprovalPromptModal();
+  });
+
+  $("approval-action-modal")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (target === $("approval-action-modal")) {
+      closeApprovalPromptModal();
+    }
+  });
+
+  $("approval-modal-approve")?.addEventListener("click", async () => {
+    const id = String(approvalModalState.approvalId || "").trim();
+    if (!id || approvalModalState.inFlight) {
+      return;
+    }
+    const actionKey = String(approvalModalState.actionKey || "").trim();
+    const autoToggle = $("approval-modal-auto-toggle");
+    const autoApproveEnabled = Boolean(autoToggle instanceof HTMLInputElement && autoToggle.checked);
+    approvalModalState.inFlight = true;
+    try {
+      if (autoApproveEnabled && actionKey) {
+        saveApprovalAutoApproveRule(actionKey, true);
+      }
+      await executeApprovalDecision(id, "approve", {
+        source: "modal",
+        skipAutomation: true,
+      });
+      closeApprovalPromptModal();
+    } catch (error) {
+      setText("approvals-output", error instanceof Error ? error.message : String(error));
+    } finally {
+      approvalModalState.inFlight = false;
+    }
+    await evaluateApprovalQueue();
+  });
+
+  $("approval-modal-reject")?.addEventListener("click", async () => {
+    const id = String(approvalModalState.approvalId || "").trim();
+    if (!id || approvalModalState.inFlight) {
+      return;
+    }
+    approvalModalState.inFlight = true;
+    try {
+      await executeApprovalDecision(id, "reject", {
+        source: "modal",
+        skipAutomation: true,
+      });
+      closeApprovalPromptModal();
+    } catch (error) {
+      setText("approvals-output", error instanceof Error ? error.message : String(error));
+    } finally {
+      approvalModalState.inFlight = false;
+    }
+    await evaluateApprovalQueue();
+  });
+
   $("desktop-command-search")?.addEventListener("input", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) {
@@ -5019,6 +6567,13 @@ const bindDashboardEvents = () => {
 
   document.addEventListener("keydown", (event) => {
     const normalizedKey = String(event.key || "").toLowerCase();
+    if (approvalModalState.open) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeApprovalPromptModal();
+      }
+      return;
+    }
     const openPaletteShortcut = (event.metaKey || event.ctrlKey) && event.shiftKey && normalizedKey === "p";
     if (openPaletteShortcut && state.desktopCapabilities.commandPalette) {
       event.preventDefault();
@@ -5095,6 +6650,9 @@ const bindDashboardEvents = () => {
   if (window.podDesktop?.onDesktopLiveEvent) {
     window.podDesktop.onDesktopLiveEvent((payload) => {
       pushDesktopLiveEvent(payload);
+      if (isApprovalQueuedLiveEvent(payload)) {
+        void refreshApprovals();
+      }
     });
   }
 
@@ -5229,6 +6787,34 @@ const bindDashboardEvents = () => {
     saveCoworkMessages();
     renderCoworkChat();
     setText("cowork-output", "");
+  });
+
+  $("cowork-focus-toggle")?.addEventListener("click", () => {
+    state.coworkView = {
+      ...normalizeCoworkViewState(state.coworkView),
+      focusMode: !Boolean(state.coworkView?.focusMode),
+    };
+    writeCoworkViewState();
+    applyCoworkViewState();
+    setBlueprintActionFeedback(
+      state.coworkView.focusMode
+        ? "Co-work focus mode enabled: streamlined workspace active."
+        : "Co-work focus mode disabled: full workspace visible.",
+      "neutral",
+    );
+  });
+
+  $("cowork-advanced-toggle")?.addEventListener("click", () => {
+    state.coworkView = {
+      ...normalizeCoworkViewState(state.coworkView),
+      showAdvanced: !Boolean(state.coworkView?.showAdvanced),
+    };
+    writeCoworkViewState();
+    applyCoworkViewState();
+    setBlueprintActionFeedback(
+      state.coworkView.showAdvanced ? "Advanced co-work panels expanded." : "Advanced co-work panels hidden.",
+      "neutral",
+    );
   });
 
   $("cowork-live-refresh")?.addEventListener("click", () => {
@@ -5634,10 +7220,12 @@ const bindDashboardEvents = () => {
       return;
     }
     try {
-      const result = await apiPost(`/api/agent/approvals/${encodeURIComponent(id)}/approve`, {});
-      setText("approvals-output", result);
-      await refreshApprovals();
-      logActivity("Approval executed", { id, ok: result?.ok });
+      await executeApprovalDecision(id, "approve", {
+        source: "queue-panel",
+      });
+      if (approvalModalState.open && approvalModalState.approvalId === id) {
+        closeApprovalPromptModal();
+      }
     } catch (error) {
       setText("approvals-output", error instanceof Error ? error.message : String(error));
     }
@@ -5650,10 +7238,12 @@ const bindDashboardEvents = () => {
       return;
     }
     try {
-      const result = await apiPost(`/api/agent/approvals/${encodeURIComponent(id)}/reject`, {});
-      setText("approvals-output", result);
-      await refreshApprovals();
-      logActivity("Approval rejected", { id, ok: result?.ok });
+      await executeApprovalDecision(id, "reject", {
+        source: "queue-panel",
+      });
+      if (approvalModalState.open && approvalModalState.approvalId === id) {
+        closeApprovalPromptModal();
+      }
     } catch (error) {
       setText("approvals-output", error instanceof Error ? error.message : String(error));
     }
@@ -6492,6 +8082,10 @@ const boot = async () => {
   state.contextInbox = readContextInbox();
   state.contextPrefs = readContextPrefs();
   state.utilityRail = readUtilityRailState();
+  state.approvalAutoApproveRules = readApprovalAutoApproveRules();
+  state.coworkView = readCoworkViewState();
+  state.ideDock = readIdeDockState();
+  state.uiLayout = readUiLayoutState();
   if (window.podDesktop?.getDesktopCapabilities) {
     try {
       const caps = await window.podDesktop.getDesktopCapabilities();
@@ -6521,7 +8115,10 @@ const boot = async () => {
   renderCoworkChat();
   renderCoworkConversations();
   hydrateGeneratedDashboardPanels();
-  initDashboardWorkbench();
+  initIdeWorkspace();
+  refreshIdeDockLayout();
+  applyUiLayoutState({ persist: false });
+  applyCoworkViewState();
   renderDashboardJsonRenderStatus();
   renderContextInbox();
   renderDesktopNotificationFeed();
@@ -6553,6 +8150,7 @@ const boot = async () => {
   await refreshIntegrationSubscribers();
   await refreshIntegrationBridgeStatus();
   await refreshTaskLogTail();
+  autoCollapseInspectorIfIdle({ persist: true });
   renderWatchObserverMeta();
   const initialWatchSession = resolveActiveWatchSession();
   if (initialWatchSession) {

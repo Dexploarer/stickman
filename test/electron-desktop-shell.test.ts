@@ -39,15 +39,26 @@ describe("electron desktop shell integrations", () => {
     expect(appSource).toContain("openDesktopCommandPalette");
     expect(appSource).toContain("executeDesktopCommand");
     expect(appSource).toContain("syncDesktopWindowChrome");
+    expect(appSource).toContain("initIdeWorkspace()");
+    expect(appSource).toContain("setIdeActivityTab");
+    expect(appSource).toContain("setIdeCenterTab");
     expect(appSource).toContain("onDesktopCommand");
     expect(appSource).toContain("onDesktopLiveEvent");
+    expect(appSource).toContain("isApprovalQueuedLiveEvent");
 
     expect(htmlSource).toContain('id="desktop-command-palette"');
     expect(htmlSource).toContain('id="desktop-command-search"');
     expect(htmlSource).toContain('id="desktop-drag-region"');
+    expect(htmlSource).toContain('id="approval-action-modal"');
+    expect(htmlSource).toContain('id="ide-activity-rail"');
+    expect(htmlSource).toContain('id="ide-bottom-rail"');
 
     expect(styleSource).toContain(".desktop-drag-region {");
     expect(styleSource).toContain(".desktop-command-item {");
+    expect(styleSource).toContain(".approval-action-modal-card {");
     expect(styleSource).toContain(".pplx-notification-feed {");
+    expect(styleSource).toContain("#dashboard-root.ide-shell {");
+    expect(styleSource).toContain(".ide-topbar");
+    expect(styleSource).toContain(".ide-activity-rail");
   });
 });

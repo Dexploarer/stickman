@@ -1,25 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 
-const electronMainSource = readFileSync(
-  new URL("../electron/main.cjs", import.meta.url),
-  "utf8"
-);
-
-const dashboardAppSource = readFileSync(
-  new URL("../web/app.js", import.meta.url),
-  "utf8"
-);
-
-const dashboardHtml = readFileSync(
-  new URL("../web/index.html", import.meta.url),
-  "utf8"
-);
-
-const webStyles = readFileSync(
-  new URL("../web/styles.css", import.meta.url),
-  "utf8"
-);
+const electronMainSource = readFileSync(new URL("../electron/main.cjs", import.meta.url), "utf8");
+const dashboardAppSource = readFileSync(new URL("../web/app.js", import.meta.url), "utf8");
+const dashboardHtml = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+const webStyles = readFileSync(new URL("../web/styles.css", import.meta.url), "utf8");
 
 describe("electron desktop shell", () => {
   it("creates a secure BrowserWindow and hosts the local dashboard", () => {
@@ -31,107 +16,61 @@ describe("electron desktop shell", () => {
   });
 });
 
-describe("dashboard workbench layout", () => {
-  it("supports tabbed pages, panel/tool/modal segments, draggable arrangement, and dynamic custom panels", () => {
-    expect(dashboardAppSource).toContain("DASHBOARD_PAGE_TABS");
-    expect(dashboardAppSource).toContain("DASHBOARD_SEGMENT_TABS");
-    expect(dashboardAppSource).toContain("DASHBOARD_MAX_CUSTOM_PANELS = 16");
-    expect(dashboardAppSource).toContain("Add Panel");
-    expect(dashboardAppSource).toContain("custom-panel-notes");
-    expect(dashboardAppSource).toContain("panel.dataset.panelSize");
-    expect(dashboardAppSource).toContain("initDashboardWorkbench()");
-    expect(dashboardAppSource).toContain("contextActionRouter");
-    expect(dashboardAppSource).toContain("renderContextInbox");
-    expect(dashboardAppSource).toContain("DASHBOARD_JSON_RENDER_SPEC_KEY");
-    expect(dashboardAppSource).toContain("hydrateGeneratedDashboardPanels()");
-    expect(dashboardAppSource).toContain("buildDashboardJsonRenderPrompt");
-    expect(dashboardAppSource).toContain("layout + columns + widgets");
-    expect(dashboardAppSource).toContain("DASHBOARD_JSON_RENDER_WIDGET_TYPES");
-    expect(dashboardAppSource).toContain("panel.draggable = true");
-    expect(dashboardAppSource).toContain("dashboard-tool-item");
-    expect(dashboardAppSource).toContain("DASHBOARD_MAX_CUSTOM_PANELS = 16");
-    expect(webStyles).toContain(".dashboard-workbench {");
-    expect(webStyles).toContain(".dashboard-panel-grid {");
-    expect(webStyles).toContain(".dashboard-workspace-body {");
-    expect(webStyles).toContain(".utility-rail {");
-    expect(webStyles).toContain(".context-inbox-item {");
-    expect(webStyles).toContain("var(--dashboard-panel-min-width");
-    expect(webStyles).toContain(".dashboard-panel-card[data-panel-size=\"wide\"]");
-    expect(webStyles).toContain(".dashboard-panel-card[data-panel-size=\"tall\"]");
-    expect(webStyles).toContain(".dashboard-panel-card[data-panel-size=\"large\"]");
-    expect(webStyles).toContain(".custom-panel-config {");
-    expect(webStyles).toContain(".panel-drag-handle {");
-    expect(webStyles).toContain(".dashboard-modal-overlay {");
-    expect(webStyles).toContain(".cowork-grid {");
+describe("dashboard ide workspace layout", () => {
+  it("boots from the ide workspace runtime path with v3 layout state", () => {
+    expect(dashboardAppSource).toContain("UI_LAYOUT_STATE_KEY");
+    expect(dashboardAppSource).toContain("state.uiLayout = readUiLayoutState()");
+    expect(dashboardAppSource).toContain("initIdeWorkspace()");
+    expect(dashboardAppSource).toContain("setIdeActivityTab");
+    expect(dashboardAppSource).toContain("setIdeCenterTab");
+    expect(dashboardAppSource).toContain("runIdeWorkspaceAction");
+    expect(dashboardAppSource).toContain("centerSplitRatio: 0.72");
+    expect(dashboardAppSource).toContain("rightInspectorCollapsed: true");
+    expect(dashboardAppSource).not.toContain("initDashboardWorkbench();");
+    expect(dashboardAppSource).not.toContain("initBlueprintShell();");
   });
 
-  it("uses blueprint shell naming and removes legacy perplexity clone identifiers", () => {
-    expect(dashboardAppSource).toContain("const BLUEPRINT_SHELL_MODE = true");
-    expect(dashboardAppSource).toContain("initBlueprintShell()");
-    expect(dashboardAppSource).toContain("blueprint-shell-root");
-    expect(dashboardAppSource).toContain("blueprintShellReady");
-    expect(dashboardAppSource).toContain("Prompt or Die");
-    expect(dashboardAppSource).not.toContain("PERPLEXITY_CLONE_MODE");
-    expect(dashboardAppSource).not.toContain("perplexityShellReady");
-
-    expect(webStyles).toContain(".blueprint-shell-root {");
-    expect(webStyles).toContain(".blueprint-shell-root::before");
-    expect(webStyles).toContain(".blueprint-shell-root .blueprint-legacy-node");
-    expect(webStyles).not.toContain(".perplexity-clone-root");
+  it("renders the IDE shell primitives and viewer-first workspace tabs", () => {
+    expect(dashboardHtml).toContain('id="dashboard-root" class="ide-shell');
+    expect(dashboardHtml).toContain('class="ide-topbar"');
+    expect(dashboardHtml).toContain('id="ide-activity-rail"');
+    expect(dashboardHtml).toContain('id="ide-left-dock"');
+    expect(dashboardHtml).toContain('id="ide-center-tabs"');
+    expect(dashboardHtml).toContain('id="ide-main-dock"');
+    expect(dashboardHtml).toContain('id="dashboard-utility-rail" class="utility-rail ide-inspector"');
+    expect(dashboardHtml).toContain('id="ide-bottom-rail"');
+    expect(dashboardHtml).toContain('data-ide-center-tab="live_observer"');
+    expect(dashboardHtml).toContain('data-ide-center-tab="mission_console"');
+    expect(dashboardHtml).toContain('data-ide-center-tab="tweet_composer"');
+    expect(dashboardHtml).toContain('id="cowork-live-iframe"');
   });
 
-  it("keeps social + X panels and removes coding-focused surface ids", () => {
-    expect(dashboardHtml).toContain("id=\"login-form\"");
-    expect(dashboardHtml).toContain("id=\"tweet-form\"");
-    expect(dashboardHtml).toContain("id=\"x-algo-form\"");
-    expect(dashboardHtml).toContain("id=\"ai-form\"");
-    expect(dashboardHtml).toContain("id=\"ai-image-form\"");
-    expect(dashboardHtml).toContain("id=\"ai-video-form\"");
-    expect(dashboardHtml).toContain("id=\"plan-form\"");
-    expect(dashboardHtml).toContain("id=\"workflow-run\"");
-    expect(dashboardHtml).toContain("id=\"cowork-mission-social\"");
-    expect(dashboardHtml).toContain("id=\"dashboard-utility-rail\"");
-    expect(dashboardHtml).toContain("id=\"context-inbox-list\"");
-    expect(dashboardHtml).toContain("id=\"utility-prefill-planner\"");
-    expect(dashboardHtml).toContain("id=\"utility-prefill-mission\"");
-    expect(dashboardHtml).toContain("id=\"utility-prefill-command\"");
-    expect(dashboardHtml).toContain("id=\"context-action-picker\"");
-    expect(dashboardHtml).toContain("data-context-picker-action=\"knowledge.capture\"");
-    expect(dashboardHtml).toContain("id=\"dashboard-json-render-generate\"");
-    expect(dashboardHtml).toContain("id=\"dashboard-json-render-apply\"");
-    expect(dashboardHtml).toContain("id=\"dashboard-json-render-clear\"");
-    expect(dashboardHtml).toContain("id=\"dashboard-json-render-output\"");
-    expect(dashboardHtml).toContain("layout + columns + widgets");
-
-    expect(dashboardHtml).not.toContain("id=\"cowork-quick-terminal\"");
-    expect(dashboardHtml).not.toContain("id=\"cowork-quick-codex\"");
-    expect(dashboardHtml).not.toContain("id=\"cowork-quick-claude\"");
-    expect(dashboardHtml).not.toContain("id=\"cowork-mission-coding\"");
-    expect(dashboardHtml).not.toContain("id=\"ext-code-enable\"");
-    expect(dashboardHtml).not.toContain("id=\"ext-code-disable\"");
-    expect(dashboardHtml).not.toContain("id=\"integration-open-terminal\"");
-    expect(dashboardHtml).not.toContain("id=\"integration-claude-login\"");
-    expect(dashboardHtml).not.toContain("id=\"code-plan-form\"");
-    expect(dashboardHtml).not.toContain("id=\"terminal-pty-refresh\"");
-    expect(dashboardHtml).not.toContain("id=\"mac-allow-terminal\"");
-    expect(dashboardHtml).not.toContain("coding mission context");
+  it("ships IDE shell styling primitives and responsive viewer constraints", () => {
+    expect(webStyles).toContain("#dashboard-root.ide-shell {");
+    expect(webStyles).toContain(".ide-topbar");
+    expect(webStyles).toContain(".ide-activity-rail");
+    expect(webStyles).toContain(".ide-sidebar");
+    expect(webStyles).toContain(".ide-editor-surface");
+    expect(webStyles).toContain(".ide-inspector");
+    expect(webStyles).toContain(".ide-bottom-rail");
+    expect(webStyles).toContain("min-width: 900px");
+    expect(webStyles).toContain("min-height: 600px");
+    expect(webStyles).toContain("@media (max-width: 1279px)");
   });
 
-  it("does not keep stale app bindings for removed coding ids", () => {
-    expect(dashboardAppSource).not.toContain("cowork-quick-terminal");
-    expect(dashboardAppSource).not.toContain("cowork-quick-codex");
-    expect(dashboardAppSource).not.toContain("cowork-quick-claude");
-    expect(dashboardAppSource).not.toContain("cowork-mission-coding");
-    expect(dashboardAppSource).not.toContain("integration-open-terminal");
-    expect(dashboardAppSource).not.toContain("integration-claude-login");
-    expect(dashboardAppSource).not.toContain("ext-code-enable");
-    expect(dashboardAppSource).not.toContain("ext-code-disable");
-    expect(dashboardAppSource).not.toContain("code-plan-form");
-    expect(dashboardAppSource).not.toContain("terminal-pty");
-    expect(dashboardAppSource).not.toContain("workspace-tree");
-    expect(dashboardAppSource).not.toContain("git-refresh");
-    expect(dashboardAppSource).not.toContain("data-cowork-command=\"/terminal\"");
-    expect(dashboardAppSource).not.toContain("data-cowork-command=\"/edit\"");
-    expect(dashboardAppSource).not.toContain("data-cowork-command=\"/git\"");
+  it("keeps social + agent feature wiring ids in the replacement shell", () => {
+    expect(dashboardHtml).toContain('id="login-form"');
+    expect(dashboardHtml).toContain('id="tweet-form"');
+    expect(dashboardHtml).toContain('id="x-algo-form"');
+    expect(dashboardHtml).toContain('id="ai-form"');
+    expect(dashboardHtml).toContain('id="ai-image-form"');
+    expect(dashboardHtml).toContain('id="ai-video-form"');
+    expect(dashboardHtml).toContain('id="plan-form"');
+    expect(dashboardHtml).toContain('id="workflow-run"');
+    expect(dashboardHtml).toContain('id="cowork-mission-social"');
+    expect(dashboardHtml).toContain('id="context-inbox-list"');
+    expect(dashboardHtml).toContain('id="approval-action-modal"');
+    expect(dashboardHtml).toContain('id="approval-modal-auto-toggle"');
+    expect(dashboardHtml).toContain('id="desktop-command-palette"');
   });
 });

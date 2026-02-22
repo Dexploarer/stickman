@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Prompt or Die Social Suite</title>
+    <title>Milady Social Suite</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@500;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Anek+Latin:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
@@ -21,9 +21,9 @@
     <main class="shell">
       <header class="hero">
         <div class="hero-content">
-          <span class="hero-kicker">Social + X Command Surface</span>
-          <h1>Prompt or Die Social Suite</h1>
-          <p>Local-first social automation with native context actions, mission routing, and reusable panel workbench layouts.</p>
+          <span class="hero-kicker">Milady Social Suite</span>
+          <h1>Co-Work IDE</h1>
+          <p>Command-first social operations workspace with full-size live observer and docked tool panes.</p>
         </div>
         <div class="hero-controls">
           <div class="chips hero-status">
@@ -31,7 +31,7 @@
             <span class="chip" id="onboarding-chip">Onboarding: checking</span>
             <button class="ghost" id="refresh-health-btn" type="button">Refresh Status</button>
           </div>
-          <p class="hero-note">Designed for fast context capture, post building, and social mission execution.</p>
+          <p class="hero-note">Palette: Cmd/Ctrl+Shift+P • Context: Cmd/Ctrl+Shift+K</p>
         </div>
       </header>
 
@@ -286,9 +286,36 @@
         </article>
       </section>
 
-      <section id="dashboard-root" class="layout hidden dashboard-shell">
-        <aside class="stack">
-          <article class="panel">
+      <section id="dashboard-root" class="ide-shell hidden dashboard-shell">
+        <header class="ide-topbar">
+          <div class="ide-topbar-left">
+            <strong class="ide-topbar-title">Milady Social IDE</strong>
+            <span id="ide-top-health" class="ide-pill">API: checking</span>
+            <span id="ide-top-onboarding" class="ide-pill">Onboarding: checking</span>
+          </div>
+          <div class="ide-topbar-right">
+            <span class="ide-hint">Cmd/Ctrl+Shift+P Palette</span>
+            <span class="ide-hint">Cmd/Ctrl+Shift+K Context</span>
+            <button class="ghost ide-toolbar-btn" type="button" id="ide-toggle-left">Sidebar</button>
+            <button class="ghost ide-toolbar-btn" type="button" id="ide-toggle-right">Inspector</button>
+            <button class="ghost ide-toolbar-btn" type="button" id="ide-toggle-bottom">Output</button>
+          </div>
+        </header>
+
+        <div class="ide-workspace">
+          <nav id="ide-activity-rail" class="ide-activity-rail" aria-label="Activity">
+            <button class="ide-activity-btn active" type="button" data-ide-activity="cowork" title="Co-Work" aria-label="Co-Work">⌂</button>
+            <button class="ide-activity-btn" type="button" data-ide-activity="compose" title="Compose" aria-label="Compose">✎</button>
+            <button class="ide-activity-btn" type="button" data-ide-activity="planner" title="Planner" aria-label="Planner">⌘</button>
+            <button class="ide-activity-btn" type="button" data-ide-activity="integrations" title="Integrations" aria-label="Integrations">⎇</button>
+            <button class="ide-activity-btn" type="button" data-ide-activity="approvals" title="Approvals" aria-label="Approvals">⚑</button>
+            <button class="ide-activity-btn" type="button" data-ide-activity="skills" title="Skills" aria-label="Skills">✦</button>
+            <button class="ide-activity-btn" type="button" data-ide-activity="settings" title="Settings" aria-label="Settings">⚙</button>
+          </nav>
+
+          <aside id="ide-left-dock" class="stack ide-dock ide-left-dock ide-sidebar">
+          <div id="ide-left-tabs" class="ide-tabbar" role="tablist" aria-label="Operations panes"></div>
+          <article id="runtime-controls-panel" class="panel" data-ide-pane data-ide-label="Runtime">
             <h2>Runtime Controls</h2>
             <div class="field-grid">
               <label>Browser</label>
@@ -344,7 +371,7 @@
             <h3>Integration Actions</h3>
             <label>Runbook</label>
             <select id="integration-runbook-select"></select>
-            <label>Action params (JSON)</label>
+            <label>Action Parameters</label>
             <textarea id="integration-params-json" rows="4" placeholder='{"sourceId":"embedded-browser","fps":2}'></textarea>
             <label>Confirm token</label>
             <input id="integration-confirm-token" type="text" placeholder="dry-run token appears here" />
@@ -394,7 +421,7 @@
             <pre id="autonomy-output"></pre>
           </article>
 
-          <article class="panel">
+          <article id="quick-automations-panel" class="panel" data-ide-pane data-ide-label="Automations">
             <h2>Quick Automations</h2>
             <div class="button-grid">
               <button type="button" id="qa-session">Session Sanity Check</button>
@@ -404,8 +431,8 @@
             <pre id="quick-output"></pre>
           </article>
 
-          <article class="panel">
-            <h2>JSON Render Dashboard Generator</h2>
+          <article id="layout-generator-panel" class="panel" data-ide-pane data-ide-label="Layout">
+            <h2>Layout Generator</h2>
             <p class="summary">
               Generate dashboard panels from a JSON Render custom-schema `layout + columns + widgets` spec (social/X focused) and apply them to the workbench.
             </p>
@@ -423,12 +450,12 @@
             <pre id="dashboard-json-render-output"></pre>
           </article>
 
-          <article class="panel">
+          <article id="recent-runs-panel" class="panel" data-ide-pane data-ide-label="Runs">
             <h2>Recent Runs</h2>
             <div id="history-list" class="history-list"></div>
           </article>
 
-          <article class="panel">
+          <article id="approval-queue-panel" class="panel" data-ide-pane data-ide-label="Approvals">
             <h2>Approval Queue</h2>
             <label>Approval ID</label>
             <input id="approval-id" type="text" placeholder="paste approval id" />
@@ -440,11 +467,11 @@
             <pre id="approvals-output"></pre>
           </article>
 
-          <article class="panel">
+          <article id="skill-center-panel" class="panel" data-ide-pane data-ide-label="Skills">
             <h2>Skill Center</h2>
             <label>Skill</label>
             <select id="skill-select"></select>
-            <label>Skill args (JSON)</label>
+            <label>Skill Parameters</label>
             <textarea id="skill-args" rows="4" placeholder='{"prompt":"Analyze this repo"}'></textarea>
             <div class="button-row">
               <button class="ghost" type="button" id="skills-refresh">Refresh Skills</button>
@@ -455,7 +482,7 @@
             <pre id="skills-output"></pre>
           </article>
 
-          <article class="panel">
+          <article id="task-board-panel" class="panel" data-ide-pane data-ide-label="Tasks">
             <h2>Task Board</h2>
             <form id="task-create-form">
               <label>Prompt / Mission</label>
@@ -477,7 +504,7 @@
             <pre id="tasks-output"></pre>
           </article>
 
-          <article class="panel">
+          <article id="mac-watch-panel" class="panel" data-ide-pane data-ide-label="Watch">
             <h2>Mac Allowlist + Watch</h2>
             <div class="toggle-row">
               <label><input id="mac-allow-antigravity" type="checkbox" checked /> allow antigravity</label>
@@ -540,14 +567,26 @@
             <pre id="livekit-output"></pre>
             <pre id="mac-policy-output"></pre>
           </article>
-        </aside>
+          </aside>
 
-        <section class="stack">
-          <article class="panel">
+          <section class="ide-editor-surface">
+            <div id="ide-center-tabs" class="ide-center-tabbar" role="tablist" aria-label="Center tabs">
+              <button type="button" class="ide-center-tab active" data-ide-center-tab="live_observer">Live Observer</button>
+              <button type="button" class="ide-center-tab" data-ide-center-tab="mission_console">Mission Console</button>
+              <button type="button" class="ide-center-tab" data-ide-center-tab="tweet_composer">Tweet Composer</button>
+            </div>
+            <section id="ide-main-dock" class="stack ide-dock ide-main-dock ide-editor">
+              <div id="ide-main-tabs" class="ide-tabbar ide-main-tabbar" role="tablist" aria-label="Workspace panes"></div>
+          <article id="cowork-panel" class="panel cowork-panel" data-ide-pane data-ide-label="Co-Work">
             <h2>Agentic Co-Workspace</h2>
             <p class="summary">
-              Milady-style three-lane cowork surface: conversations, agent chat/task dispatch, and live observer stream.
+              Claude-code style three-lane cowork surface: conversations, command/task dispatch, and live observer stream.
             </p>
+            <div class="cowork-toolbar">
+              <button class="ghost" type="button" id="cowork-focus-toggle">Enable Focus Mode</button>
+              <button class="ghost" type="button" id="cowork-advanced-toggle">Show Advanced Panels</button>
+              <span class="cowork-toolbar-hint">Slash commands: /status /help /new /compact /watch</span>
+            </div>
             <div class="cowork-grid">
               <section class="cowork-lane">
                 <h3>Conversations</h3>
@@ -580,7 +619,7 @@
                 <pre id="cowork-output"></pre>
                 <pre id="cowork-state-output"></pre>
 
-                <div class="sub-panel">
+                <div class="sub-panel cowork-advanced-panel">
                   <h3>Quick Agent Skills</h3>
                   <p class="summary">Launch core agent actions with one click while keeping approval controls intact.</p>
                   <label>Quick URL (for browser action)</label>
@@ -593,7 +632,7 @@
                   </div>
                 </div>
 
-                <div class="sub-panel">
+                <div class="sub-panel cowork-advanced-panel">
                   <h3>Mission Templates</h3>
                   <p class="summary">Create social mission chains in one click.</p>
                   <label>Mission Template</label>
@@ -608,12 +647,12 @@
                   </div>
                 </div>
 
-                <div class="sub-panel">
+                <div class="sub-panel cowork-advanced-panel">
                   <h3>Active Task Board</h3>
                   <div id="cowork-task-board" class="cowork-task-board"></div>
                 </div>
 
-                <div class="sub-panel">
+                <div class="sub-panel cowork-advanced-panel">
                   <h3>Task Log Tail</h3>
                   <label>Task ID</label>
                   <select id="cowork-log-task-select"></select>
@@ -652,7 +691,7 @@
             </div>
           </article>
 
-          <article class="panel split">
+          <article id="compose-panel" class="panel split" data-ide-pane data-ide-label="Compose">
             <section>
               <h2>Login Refresh</h2>
               <form id="login-form">
@@ -682,7 +721,7 @@
             </section>
           </article>
 
-          <article class="panel">
+          <article id="command-studio-panel" class="panel" data-ide-pane data-ide-label="Commands">
             <h2>Command Studio</h2>
             <form id="endpoint-form">
               <label>Search endpoint</label>
@@ -693,10 +732,9 @@
               <div id="endpoint-args" class="arg-grid"></div>
               <button type="submit">Run Endpoint</button>
             </form>
-            <pre id="endpoint-output"></pre>
           </article>
 
-          <article class="panel split">
+          <article id="planner-panel" class="panel split" data-ide-pane data-ide-label="Planner">
             <section>
               <h2>AI Workflow Planner</h2>
               <form id="plan-form">
@@ -718,7 +756,7 @@
 
             <section>
               <h2>Workflow Runner</h2>
-              <label>Workflow JSON</label>
+              <label>Workflow Script</label>
               <textarea id="workflow-json" rows="14">
 {
   "stopOnError": true,
@@ -731,14 +769,14 @@
               </textarea>
               <div class="button-row">
                 <button type="button" id="workflow-run">Run Workflow</button>
-                <button type="button" id="workflow-format" class="ghost">Format JSON</button>
+                <button type="button" id="workflow-format" class="ghost">Format Script</button>
                 <button type="button" id="workflow-clear" class="ghost">Clear</button>
               </div>
               <pre id="workflow-output"></pre>
             </section>
           </article>
 
-          <article class="panel split">
+          <article id="ai-chat-panel" class="panel split" data-ide-pane data-ide-label="AI Chat">
             <section>
               <h2>AI Chat Copilot</h2>
               <form id="ai-form">
@@ -754,13 +792,9 @@
               </form>
               <pre id="ai-output"></pre>
             </section>
-            <section>
-              <h2>Activity Log</h2>
-              <pre id="activity-log"></pre>
-            </section>
           </article>
 
-          <article class="panel split">
+          <article id="media-copilot-panel" class="panel split" data-ide-pane data-ide-label="Media AI">
             <section>
               <h2>AI Image Copilot</h2>
               <form id="ai-image-form">
@@ -791,7 +825,7 @@
             </section>
           </article>
 
-          <article class="panel split">
+          <article id="x-algo-panel" class="panel split" data-ide-pane data-ide-label="X Algo">
             <section>
               <h2>X Algorithm OS Lab</h2>
               <form id="x-algo-form">
@@ -819,13 +853,30 @@
               <pre id="x-algo-weights"></pre>
             </section>
           </article>
-        </section>
+            </section>
+          </section>
 
-        <aside id="dashboard-utility-rail" class="utility-rail hidden" aria-hidden="false">
+          <aside id="dashboard-utility-rail" class="utility-rail ide-inspector" aria-hidden="false">
           <div class="utility-rail-head">
-            <h2>Right Utility Rail</h2>
+            <h2>Inspector</h2>
             <button class="ghost" type="button" id="utility-rail-toggle">Collapse</button>
           </div>
+          <section class="sub-panel ide-inspector-module">
+            <h3>Task Summary</h3>
+            <pre id="ide-task-summary">No task data.</pre>
+          </section>
+          <section class="sub-panel ide-inspector-module">
+            <h3>Approval Queue Summary</h3>
+            <pre id="ide-approval-summary">No approval data.</pre>
+          </section>
+          <section class="sub-panel ide-inspector-module">
+            <h3>Watch Session State</h3>
+            <pre id="ide-watch-summary">No active watch session.</pre>
+          </section>
+          <section class="sub-panel ide-inspector-module">
+            <h3>Provider + Integration Health</h3>
+            <pre id="ide-provider-summary">Provider health unknown.</pre>
+          </section>
           <p class="summary" id="context-mode-hint">Web fallback active: use Send Context or Cmd/Ctrl+Shift+K.</p>
           <p class="summary" id="context-feedback-line">Context tools ready.</p>
 
@@ -860,7 +911,28 @@
               <button class="ghost" type="button" id="utility-archive-knowledge">Archive to Knowledge</button>
             </div>
           </section>
-        </aside>
+          </aside>
+        </div>
+
+        <section id="ide-bottom-rail" class="ide-bottom-rail">
+          <div class="ide-bottom-head">
+            <h2>Output</h2>
+          </div>
+          <div class="ide-bottom-grid">
+            <section class="ide-bottom-module">
+              <h3>Endpoint Output</h3>
+              <pre id="endpoint-output"></pre>
+            </section>
+            <section class="ide-bottom-module">
+              <h3>Activity Log</h3>
+              <pre id="activity-log"></pre>
+            </section>
+            <section class="ide-bottom-module">
+              <h3>Error Stream</h3>
+              <pre id="ide-error-stream">No renderer errors.</pre>
+            </section>
+          </div>
+        </section>
       </section>
     </main>
 
@@ -904,6 +976,41 @@
         <input id="desktop-command-search" type="text" placeholder="Search commands..." autocomplete="off" />
         <div id="desktop-command-hint" class="desktop-command-hint">Use ↑/↓ to navigate and Enter to run.</div>
         <div id="desktop-command-list" class="desktop-command-list" role="listbox"></div>
+      </div>
+    </div>
+
+    <div id="approval-action-modal" class="dashboard-modal-overlay hidden approval-action-modal-overlay" aria-hidden="true">
+      <div class="dashboard-modal-card approval-action-modal-card" role="dialog" aria-modal="true" aria-labelledby="approval-modal-title">
+        <div class="dashboard-modal-head">
+          <h3 id="approval-modal-title">Approval Required</h3>
+          <button class="ghost" type="button" id="approval-modal-close">Close</button>
+        </div>
+        <p id="approval-modal-summary" class="summary">A guarded action is waiting for approval.</p>
+        <div class="approval-modal-meta-grid">
+          <div class="approval-modal-meta-item">
+            <label>Type</label>
+            <code id="approval-modal-type">-</code>
+          </div>
+          <div class="approval-modal-meta-item">
+            <label>Action</label>
+            <code id="approval-modal-action">-</code>
+          </div>
+          <div class="approval-modal-meta-item">
+            <label>Reason</label>
+            <code id="approval-modal-reason">-</code>
+          </div>
+        </div>
+        <label>Request Details</label>
+        <pre id="approval-modal-details"></pre>
+        <label class="approval-modal-auto-toggle">
+          <input id="approval-modal-auto-toggle" type="checkbox" />
+          Don't ask me again for this action (auto-approve)
+        </label>
+        <p id="approval-modal-auto-hint" class="summary">Auto-approve scope is shown here.</p>
+        <div class="button-row">
+          <button class="ghost" type="button" id="approval-modal-reject">Reject</button>
+          <button type="button" id="approval-modal-approve">Approve</button>
+        </div>
       </div>
     </div>
 
