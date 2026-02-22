@@ -42,6 +42,11 @@ describe("dashboard workbench layout", () => {
     expect(dashboardAppSource).toContain("initDashboardWorkbench()");
     expect(dashboardAppSource).toContain("contextActionRouter");
     expect(dashboardAppSource).toContain("renderContextInbox");
+    expect(dashboardAppSource).toContain("DASHBOARD_JSON_RENDER_SPEC_KEY");
+    expect(dashboardAppSource).toContain("hydrateGeneratedDashboardPanels()");
+    expect(dashboardAppSource).toContain("buildDashboardJsonRenderPrompt");
+    expect(dashboardAppSource).toContain("layout + columns + widgets");
+    expect(dashboardAppSource).toContain("DASHBOARD_JSON_RENDER_WIDGET_TYPES");
     expect(dashboardAppSource).toContain("panel.draggable = true");
     expect(dashboardAppSource).toContain("dashboard-tool-item");
     expect(dashboardAppSource).toContain("DASHBOARD_MAX_CUSTOM_PANELS = 16");
@@ -77,6 +82,11 @@ describe("dashboard workbench layout", () => {
     expect(dashboardHtml).toContain("id=\"utility-prefill-command\"");
     expect(dashboardHtml).toContain("id=\"context-action-picker\"");
     expect(dashboardHtml).toContain("data-context-picker-action=\"knowledge.capture\"");
+    expect(dashboardHtml).toContain("id=\"dashboard-json-render-generate\"");
+    expect(dashboardHtml).toContain("id=\"dashboard-json-render-apply\"");
+    expect(dashboardHtml).toContain("id=\"dashboard-json-render-clear\"");
+    expect(dashboardHtml).toContain("id=\"dashboard-json-render-output\"");
+    expect(dashboardHtml).toContain("layout + columns + widgets");
 
     expect(dashboardHtml).not.toContain("id=\"cowork-quick-terminal\"");
     expect(dashboardHtml).not.toContain("id=\"cowork-quick-codex\"");

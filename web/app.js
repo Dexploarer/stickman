@@ -17,8 +17,12 @@ const MAX_HISTORY = 50;
 const DASHBOARD_LAYOUT_KEY = "prompt-or-die-social-suite.dashboard.layout.v1";
 const DASHBOARD_VIEW_KEY = "prompt-or-die-social-suite.dashboard.view.v1";
 const DASHBOARD_CUSTOM_PANELS_KEY = "prompt-or-die-social-suite.dashboard.custom-panels.v1";
+const DASHBOARD_JSON_RENDER_SPEC_KEY = "prompt-or-die-social-suite.dashboard.json-render-spec.v1";
 const DASHBOARD_MAX_CUSTOM_PANELS = 16;
 const DASHBOARD_PANEL_SIZE_ORDER = ["auto", "wide", "tall", "large"];
+const DASHBOARD_JSON_RENDER_LAYOUTS = ["grid", "stack", "tabs"];
+const DASHBOARD_JSON_RENDER_WIDGET_TYPES = ["panel", "metric", "chart", "table", "text"];
+const DASHBOARD_JSON_RENDER_MAX_PANELS = 12;
 const CONTEXT_INBOX_MAX_ITEMS = 120;
 const CONTEXT_DEFAULT_PREFS = Object.freeze({
   pickerLastAction: "post.append_to_composer",
@@ -84,6 +88,8 @@ const state = {
   desktopCapabilities: {
     nativeContextMenu: false,
   },
+  dashboardJsonRenderSpec: null,
+  dashboardJsonRenderDraft: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -104,6 +110,370 @@ const parseMaybeJSON = (raw) => {
   } catch {
     return raw;
   }
+};
+
+const normalizeDashboardPageId = (value) => {
+  const candidate = String(value || "").trim();
+  return DASHBOARD_PAGE_TABS.some((item) => item.id === candidate && candidate !== "all") ? candidate : "operations";
+};
+
+const normalizeDashboardSegmentId = (value) => {
+  const candidate = String(value || "").trim();
+  if (candidate === "tool" || candidate === "modal") {
+    return candidate;
+  }
+  return "panel";
+};
+
+const normalizeDashboardLayout = (value) => {
+  const candidate = String(value || "").trim().toLowerCase();
+  return DASHBOARD_JSON_RENDER_LAYOUTS.includes(candidate) ? candidate : "grid";
+};
+
+const normalizeDashboardColumns = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 2;
+  }
+  return Math.max(1, Math.min(4, Math.round(parsed)));
+};
+
+const normalizeDashboardWidgetType = (value) => {
+  const candidate = String(value || "").trim().toLowerCase();
+  return DASHBOARD_JSON_RENDER_WIDGET_TYPES.includes(candidate) ? candidate : "panel";
+};
+
+const normalizeWidgetContentList = (value, limit = 12) =>
+  Array.isArray(value)
+    ? value
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .slice(0, limit)
+    : [];
+
+const normalizeDashboardWidget = (widget, index) => {
+  if (!widget || typeof widget !== "object" || Array.isArray(widget)) {
+    return null;
+  }
+
+  const widgetType = normalizeDashboardWidgetType(widget.type);
+  const id = String(widget.id || `json-widget-${index + 1}`).trim().slice(0, 80);
+  const titleBase = String(widget.title || "").trim();
+  const titleFallback = widgetType === "text" ? "Context Note" : `Generated ${widgetType[0].toUpperCase()}${widgetType.slice(1)}`;
+  const title = (titleBase || `${titleFallback} ${index + 1}`).slice(0, 90);
+  if (!title) {
+    return null;
+  }
+
+  const summary = String(widget.summary || widget.description || "").trim().slice(0, 300);
+  const page = normalizeDashboardPageId(widget.page);
+  const segment = normalizeDashboardSegmentId(widget.segment);
+  const size = normalizeDashboardPanelSize(widget.size);
+
+  const explicitContent = normalizeWidgetContentList(widget.content);
+  const derivedContent = [];
+  if (widgetType === "metric") {
+    const value = String(widget.value || "").trim().slice(0, 120);
+    const trend = String(widget.trend || "").trim().toLowerCase();
+    const change = String(widget.change || "").trim().slice(0, 120);
+    if (value) {
+      derivedContent.push(`Value: ${value}`);
+    }
+    if (trend && ["up", "down", "flat"].includes(trend)) {
+      derivedContent.push(`Trend: ${trend}${change ? ` (${change})` : ""}`);
+    }
+  } else if (widgetType === "chart") {
+    const chartType = String(widget.chartType || "").trim().toLowerCase();
+    const dataKey = String(widget.dataKey || "").trim().slice(0, 120);
+    if (chartType) {
+      derivedContent.push(`Chart: ${chartType}`);
+    }
+    if (dataKey) {
+      derivedContent.push(`Data: ${dataKey}`);
+    }
+  } else if (widgetType === "table") {
+    const columns = normalizeWidgetContentList(widget.columns, 8);
+    const dataKey = String(widget.dataKey || "").trim().slice(0, 120);
+    if (columns.length) {
+      derivedContent.push(`Columns: ${columns.join(", ")}`);
+    }
+    if (dataKey) {
+      derivedContent.push(`Data: ${dataKey}`);
+    }
+  } else if (widgetType === "text") {
+    const contentText = String(widget.contentText || widget.text || widget.content || "").trim().slice(0, 240);
+    if (contentText) {
+      derivedContent.push(contentText);
+    }
+  }
+
+  const content = (explicitContent.length ? explicitContent : derivedContent).slice(0, 12);
+  return {
+    id,
+    type: "panel",
+    widgetType,
+    title,
+    summary,
+    page,
+    segment,
+    size,
+    content,
+  };
+};
+
+const normalizeJsonRenderPanelElement = (element, index) => {
+  if (!element || typeof element !== "object" || Array.isArray(element)) {
+    return null;
+  }
+  const rawType = String(element.type || "").trim().toLowerCase();
+  if (rawType !== "panel") {
+    return null;
+  }
+  const id = String(element.id || `json-panel-${index + 1}`).trim().slice(0, 80);
+  const title = String(element.title || `Generated Panel ${index + 1}`).trim().slice(0, 90);
+  if (!title) {
+    return null;
+  }
+  const summary = String(element.summary || "").trim().slice(0, 300);
+  const page = normalizeDashboardPageId(element.page);
+  const segment = normalizeDashboardSegmentId(element.segment);
+  const size = normalizeDashboardPanelSize(element.size);
+  const textBlocks = Array.isArray(element.content)
+    ? element.content.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+    : [];
+  return {
+    id,
+    type: "panel",
+    widgetType: "panel",
+    title,
+    summary,
+    page,
+    segment,
+    size,
+    content: textBlocks,
+  };
+};
+
+const normalizeDashboardJsonRenderSpec = (spec) => {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+    return null;
+  }
+  const root = spec.root && typeof spec.root === "object" && !Array.isArray(spec.root) ? spec.root : {};
+  const usingCustomSchema = Array.isArray(spec.widgets);
+
+  if (usingCustomSchema) {
+    const widgets = spec.widgets
+      .map((item, index) => normalizeDashboardWidget(item, index))
+      .filter(Boolean)
+      .slice(0, DASHBOARD_JSON_RENDER_MAX_PANELS);
+    if (!widgets.length) {
+      return null;
+    }
+    return {
+      layout: normalizeDashboardLayout(spec.layout),
+      columns: normalizeDashboardColumns(spec.columns),
+      root: {
+        type: "dashboard",
+        title: String(spec.title || root.title || "Generated Dashboard").trim().slice(0, 120),
+        description: String(spec.description || root.description || "").trim().slice(0, 400),
+      },
+      widgets,
+      elements: widgets.map((widget) => ({
+        id: widget.id,
+        type: "panel",
+        widgetType: widget.widgetType,
+        title: widget.title,
+        summary: widget.summary,
+        page: widget.page,
+        segment: widget.segment,
+        size: widget.size,
+        content: widget.content,
+      })),
+    };
+  }
+
+  const elementsRaw = Array.isArray(spec.elements) ? spec.elements : [];
+  const elements = elementsRaw
+    .map((item, index) => normalizeJsonRenderPanelElement(item, index))
+    .filter(Boolean)
+    .slice(0, DASHBOARD_JSON_RENDER_MAX_PANELS);
+  if (!elements.length) {
+    return null;
+  }
+  return {
+    layout: "grid",
+    columns: 2,
+    root: {
+      type: "dashboard",
+      title: String(root.title || "Generated Dashboard").trim().slice(0, 120),
+      description: String(root.description || "").trim().slice(0, 400),
+    },
+    widgets: elements.map((element, index) => ({
+      id: element.id || `json-widget-${index + 1}`,
+      type: "panel",
+      widgetType: "panel",
+      title: element.title,
+      summary: element.summary,
+      page: element.page,
+      segment: element.segment,
+      size: element.size,
+      content: Array.isArray(element.content) ? element.content : [],
+    })),
+    elements,
+  };
+};
+
+const readDashboardJsonRenderSpec = () => {
+  const parsed = parseMaybeJSON(window.localStorage.getItem(DASHBOARD_JSON_RENDER_SPEC_KEY) || "");
+  return normalizeDashboardJsonRenderSpec(parsed);
+};
+
+const writeDashboardJsonRenderSpec = (spec) => {
+  if (!spec) {
+    window.localStorage.removeItem(DASHBOARD_JSON_RENDER_SPEC_KEY);
+    return;
+  }
+  window.localStorage.setItem(DASHBOARD_JSON_RENDER_SPEC_KEY, JSON.stringify(spec));
+};
+
+const extractJsonObjectFromText = (rawText) => {
+  const text = String(rawText || "").trim();
+  if (!text) {
+    return null;
+  }
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced ? fenced[1] : text).trim();
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      const inner = candidate.slice(start, end + 1);
+      try {
+        return JSON.parse(inner);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+};
+
+const buildDashboardJsonRenderPrompt = (goal) => {
+  const task = String(goal || "").trim();
+  return [
+    "Generate a JSON dashboard specification using JSON Render custom schema format.",
+    "Return ONLY valid JSON. Do not include markdown fences or extra commentary.",
+    "Schema:",
+    "{",
+    '  "layout": "grid|stack|tabs",',
+    '  "columns": 1-4,',
+    '  "title": "string",',
+    '  "description": "string",',
+    '  "widgets": [',
+    '    {',
+    '      "type": "panel|metric|chart|table|text",',
+    '      "id": "string",',
+    '      "title": "string",',
+    '      "summary": "string",',
+    '      "page": "operations|studio",',
+    '      "segment": "panel|tool|modal",',
+    '      "size": "auto|wide|tall|large",',
+    '      "content": ["string", "string"],',
+    '      "value": "string (metric only)",',
+    '      "trend": "up|down|flat (metric only)",',
+    '      "change": "string (metric only)",',
+    '      "chartType": "line|bar|pie|area (chart only)",',
+    '      "dataKey": "string (chart/table only)",',
+    '      "columns": ["id", "customer", "amount"] (table only)',
+    "    }",
+    "  ]",
+    "}",
+    "Constraints:",
+    "- 6 to 10 elements",
+    "- social and X focused only",
+    "- no coding or terminal features",
+    "- concise, actionable panel copy",
+    "- include a mix of widget types where useful",
+    task ? `Goal: ${task}` : "Goal: improve social operations dashboard UX",
+  ].join("\n");
+};
+
+const buildGeneratedDashboardPanelNode = (element) => {
+  const panel = document.createElement("article");
+  panel.className = "panel generated-dashboard-panel";
+  panel.dataset.generatedWidgetType = String(element.widgetType || "panel");
+  panel.dataset.dashboardPage = element.page;
+  panel.dataset.dashboardSegment = element.segment;
+  panel.dataset.dashboardPanelSize = element.size;
+
+  const title = document.createElement("h2");
+  title.textContent = element.title;
+  panel.appendChild(title);
+
+  if (element.summary) {
+    const summary = document.createElement("p");
+    summary.className = "summary";
+    summary.textContent = element.summary;
+    panel.appendChild(summary);
+  }
+
+  if (Array.isArray(element.content) && element.content.length) {
+    const list = document.createElement("ul");
+    list.className = "generated-panel-list";
+    element.content.forEach((line) => {
+      const item = document.createElement("li");
+      item.textContent = line;
+      list.appendChild(item);
+    });
+    panel.appendChild(list);
+  }
+
+  return panel;
+};
+
+const hydrateGeneratedDashboardPanels = () => {
+  const root = $("dashboard-root");
+  if (!(root instanceof HTMLElement)) {
+    return;
+  }
+  const rightColumn = root.querySelector(":scope > section.stack");
+  if (!(rightColumn instanceof HTMLElement)) {
+    return;
+  }
+  rightColumn.querySelectorAll(".generated-dashboard-panel").forEach((node) => node.remove());
+  const spec = state.dashboardJsonRenderSpec;
+  if (!spec || !Array.isArray(spec.elements)) {
+    return;
+  }
+  spec.elements.forEach((element) => {
+    const panel = buildGeneratedDashboardPanelNode(element);
+    rightColumn.appendChild(panel);
+  });
+};
+
+const summarizeDashboardJsonRenderSpec = (spec) => {
+  if (!spec) {
+    return { enabled: false, panelCount: 0 };
+  }
+  const widgets = Array.isArray(spec.widgets) ? spec.widgets : Array.isArray(spec.elements) ? spec.elements : [];
+  return {
+    enabled: true,
+    layout: spec.layout || "grid",
+    columns: normalizeDashboardColumns(spec.columns),
+    title: spec.root?.title || "Generated Dashboard",
+    description: spec.root?.description || "",
+    panelCount: widgets.length,
+    panels: widgets.map((element) => ({
+          id: element.id,
+          type: element.widgetType || element.type || "panel",
+          title: element.title,
+          page: element.page,
+          segment: element.segment,
+          size: element.size,
+        })),
+  };
 };
 
 const slugifyPanelId = (value) =>
@@ -649,6 +1019,19 @@ const syncContextSurfaceAvailability = () => {
   }
 };
 
+const renderDashboardJsonRenderStatus = () => {
+  setText("dashboard-json-render-output", {
+    active: summarizeDashboardJsonRenderSpec(state.dashboardJsonRenderSpec),
+    draft: summarizeDashboardJsonRenderSpec(state.dashboardJsonRenderDraft),
+  });
+};
+
+const applyDashboardJsonRenderSpec = (spec) => {
+  state.dashboardJsonRenderSpec = spec;
+  writeDashboardJsonRenderSpec(spec);
+  renderDashboardJsonRenderStatus();
+};
+
 const initDashboardWorkbench = () => {
   const root = $("dashboard-root");
   if (!root || root.dataset.workbenchReady === "true") {
@@ -1150,12 +1533,17 @@ const initDashboardWorkbench = () => {
     const titleNode = panel.querySelector("h2");
     const title = (titleNode?.textContent || `Panel ${index + 1}`).trim();
     const meta = deriveDashboardPanelMeta(title);
+    const page = panel.dataset.dashboardPage ? normalizeDashboardPageId(panel.dataset.dashboardPage) : meta.page;
+    const segment = panel.dataset.dashboardSegment
+      ? normalizeDashboardSegmentId(panel.dataset.dashboardSegment)
+      : meta.segment;
+    const size = panel.dataset.dashboardPanelSize ? normalizeDashboardPanelSize(panel.dataset.dashboardPanelSize) : "auto";
     registerPanel(panel, {
       panelId: title,
       title,
-      page: meta.page,
-      segment: meta.segment,
-      size: "auto",
+      page,
+      segment,
+      size,
       custom: false,
     });
   });
@@ -3634,6 +4022,52 @@ const bindDashboardEvents = () => {
     });
   }
 
+  $("dashboard-json-render-generate")?.addEventListener("click", async () => {
+    const prompt = ($("dashboard-json-render-prompt")?.value || "").trim();
+    try {
+      setText("dashboard-json-render-output", "Generating JSON Render dashboard spec...");
+      const result = await apiPost("/api/ai/chat", {
+        system:
+          "You are a dashboard JSON generator. Output strict JSON only with layout + columns + widgets following the requested schema.",
+        prompt: buildDashboardJsonRenderPrompt(prompt),
+      });
+      const raw = result?.data?.text || "";
+      const parsed = extractJsonObjectFromText(raw);
+      const normalized = normalizeDashboardJsonRenderSpec(parsed);
+      if (!normalized) {
+        throw new Error("Model returned invalid dashboard JSON. Try a simpler prompt.");
+      }
+      state.dashboardJsonRenderDraft = normalized;
+      renderDashboardJsonRenderStatus();
+      logActivity("Dashboard JSON render draft generated", {
+        panelCount: Array.isArray(normalized.widgets) ? normalized.widgets.length : normalized.elements.length,
+        title: normalized.root?.title || "Generated Dashboard",
+      });
+    } catch (error) {
+      setText("dashboard-json-render-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dashboard-json-render-apply")?.addEventListener("click", () => {
+    const spec = state.dashboardJsonRenderDraft || state.dashboardJsonRenderSpec;
+    if (!spec) {
+      setText("dashboard-json-render-output", "Generate a dashboard spec first.");
+      return;
+    }
+    applyDashboardJsonRenderSpec(spec);
+    window.localStorage.removeItem(DASHBOARD_LAYOUT_KEY);
+    window.localStorage.removeItem(DASHBOARD_VIEW_KEY);
+    window.location.reload();
+  });
+
+  $("dashboard-json-render-clear")?.addEventListener("click", () => {
+    state.dashboardJsonRenderDraft = null;
+    applyDashboardJsonRenderSpec(null);
+    window.localStorage.removeItem(DASHBOARD_LAYOUT_KEY);
+    window.localStorage.removeItem(DASHBOARD_VIEW_KEY);
+    window.location.reload();
+  });
+
   $("cowork-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const task = ($("cowork-task-input")?.value || "").trim();
@@ -4962,6 +5396,8 @@ const bindDashboardEvents = () => {
 const boot = async () => {
   state.history = loadHistory();
   state.coworkMessages = loadCoworkMessages();
+  state.dashboardJsonRenderSpec = readDashboardJsonRenderSpec();
+  state.dashboardJsonRenderDraft = null;
   state.contextInbox = readContextInbox();
   state.contextPrefs = readContextPrefs();
   state.utilityRail = readUtilityRailState();
@@ -4980,7 +5416,9 @@ const boot = async () => {
   renderHistory();
   renderCoworkChat();
   renderCoworkConversations();
+  hydrateGeneratedDashboardPanels();
   initDashboardWorkbench();
+  renderDashboardJsonRenderStatus();
   renderContextInbox();
   syncUtilityRailState();
   syncContextSurfaceAvailability();

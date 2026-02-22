@@ -1,6 +1,7 @@
 node_modules/
 .env
 dist/
+dist-installer/
 *.log
 x-local/.state/
 x-local/.venv/

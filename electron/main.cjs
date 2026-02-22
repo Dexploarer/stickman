@@ -1,7 +1,9 @@
 const { app, BrowserWindow, ipcMain, shell, Menu } = require("electron");
 const { spawn } = require("node:child_process");
+const { existsSync } = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 const projectRoot = path.resolve(__dirname, "..");
 const port = Number(process.env.PORT || 8787);
@@ -10,6 +12,7 @@ const shouldStartServer = process.env.POD_ELECTRON_START_SERVER !== "false";
 
 let mainWindow = null;
 let serverProcess = null;
+let inProcessServerStarted = false;
 
 const CONTEXT_ACTION_ALLOWLIST = new Set([
   "post.append_to_composer",
@@ -200,9 +203,49 @@ const waitForServer = (url, timeoutMs = 60_000) =>
     check();
   });
 
-const startServer = () => {
-  if (!shouldStartServer || serverProcess) {
-    return;
+const resolveBundledServerEntry = () => {
+  const appPath = app.getAppPath();
+  const candidates = [
+    path.join(projectRoot, "dist", "server.js"),
+    path.join(appPath, "dist", "server.js"),
+    path.join(process.resourcesPath, "app", "dist", "server.js"),
+    path.join(process.resourcesPath, "app.asar", "dist", "server.js"),
+    path.join(process.resourcesPath, "dist", "server.js"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // ignore candidate lookup errors
+    }
+  }
+  return null;
+};
+
+const startBundledServerInProcess = async () => {
+  if (inProcessServerStarted) {
+    return true;
+  }
+  const serverEntry = resolveBundledServerEntry();
+  if (!serverEntry) {
+    console.warn("[electron] unable to locate bundled server entry (dist/server.js).");
+    return false;
+  }
+  try {
+    await import(pathToFileURL(serverEntry).href);
+    inProcessServerStarted = true;
+    return true;
+  } catch (error) {
+    console.error(`[electron] failed to boot bundled server from ${serverEntry}:`, error);
+    return false;
+  }
+};
+
+const startServer = async () => {
+  if (!shouldStartServer || serverProcess || inProcessServerStarted) {
+    return shouldStartServer;
   }
 
   const env = {
@@ -218,14 +261,42 @@ const startServer = () => {
       stdio: "inherit",
       shell: true,
     });
-  } else {
-    serverProcess = spawn("bun", ["src/server.ts"], {
-      cwd: projectRoot,
-      env,
-      stdio: "inherit",
-      shell: false,
+    serverProcess.on("error", (error) => {
+      console.error(`[electron] failed to start custom server command: ${error?.message || String(error)}`);
+      serverProcess = null;
     });
+    serverProcess.on("exit", (code, signal) => {
+      if (!app.isQuitting) {
+        console.warn(`[electron] local server exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`);
+      }
+      serverProcess = null;
+    });
+    return true;
   }
+
+  if (app.isPackaged) {
+    const started = await startBundledServerInProcess();
+    if (!started) {
+      console.warn("[electron] packaged app could not start embedded server.");
+    }
+    return started;
+  }
+
+  serverProcess = spawn("bun", ["src/server.ts"], {
+    cwd: projectRoot,
+    env,
+    stdio: "inherit",
+    shell: false,
+  });
+
+  serverProcess.on("error", (error) => {
+    const message = error?.message || String(error);
+    if (error?.code === "ENOENT") {
+      console.error("[electron] Bun executable not found. Install Bun or set POD_SERVER_COMMAND.");
+    }
+    console.error(`[electron] failed to start local server: ${message}`);
+    serverProcess = null;
+  });
 
   serverProcess.on("exit", (code, signal) => {
     if (!app.isQuitting) {
@@ -233,6 +304,8 @@ const startServer = () => {
     }
     serverProcess = null;
   });
+
+  return true;
 };
 
 const stopServer = () => {
@@ -335,10 +408,10 @@ app.on("activate", async () => {
 });
 
 app.whenReady().then(async () => {
-  startServer();
+  const startedServer = await startServer();
 
   try {
-    await waitForServer(appUrl, shouldStartServer ? 90_000 : 8_000);
+    await waitForServer(appUrl, shouldStartServer && startedServer ? 90_000 : 8_000);
   } catch (error) {
     console.warn(`[electron] ${error instanceof Error ? error.message : String(error)}`);
   }

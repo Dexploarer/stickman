@@ -6,8 +6,8 @@
     <title>Prompt or Die Social Suite</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-      <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
@@ -16,18 +16,22 @@
     <div class="ambient"></div>
     <main class="shell">
       <header class="hero">
-        <div>
+        <div class="hero-content">
+          <span class="hero-kicker">Social + X Command Surface</span>
           <h1>Prompt or Die Social Suite</h1>
-          <p>Local-first social automation with onboarding, model orchestration, and workflow execution.</p>
+          <p>Local-first social automation with native context actions, mission routing, and reusable panel workbench layouts.</p>
         </div>
-        <div class="chips">
-          <span class="chip" id="health-chip">API: checking</span>
-          <span class="chip" id="onboarding-chip">Onboarding: checking</span>
-          <button class="ghost" id="refresh-health-btn" type="button">Refresh Status</button>
+        <div class="hero-controls">
+          <div class="chips hero-status">
+            <span class="chip" id="health-chip">API: checking</span>
+            <span class="chip" id="onboarding-chip">Onboarding: checking</span>
+            <button class="ghost" id="refresh-health-btn" type="button">Refresh Status</button>
+          </div>
+          <p class="hero-note">Designed for fast context capture, post building, and social mission execution.</p>
         </div>
       </header>
 
-      <section id="onboarding-root" class="stack">
+      <section id="onboarding-root" class="stack onboarding-shell">
         <article class="panel">
           <h2>Onboarding</h2>
           <p class="summary">
@@ -278,7 +282,7 @@
         </article>
       </section>
 
-      <section id="dashboard-root" class="layout hidden">
+      <section id="dashboard-root" class="layout hidden dashboard-shell">
         <aside class="stack">
           <article class="panel">
             <h2>Runtime Controls</h2>
@@ -394,6 +398,25 @@
               <button type="button" id="qa-trendscan">Trend Scan</button>
             </div>
             <pre id="quick-output"></pre>
+          </article>
+
+          <article class="panel">
+            <h2>JSON Render Dashboard Generator</h2>
+            <p class="summary">
+              Generate dashboard panels from a JSON Render custom-schema `layout + columns + widgets` spec (social/X focused) and apply them to the workbench.
+            </p>
+            <label>Generation prompt</label>
+            <textarea
+              id="dashboard-json-render-prompt"
+              rows="4"
+              placeholder="Build a high-velocity social ops dashboard for X trend capture, post drafting, and mission execution."
+            ></textarea>
+            <div class="button-row">
+              <button class="ghost" type="button" id="dashboard-json-render-generate">Generate Spec</button>
+              <button class="ghost" type="button" id="dashboard-json-render-apply">Apply + Reload</button>
+              <button class="ghost" type="button" id="dashboard-json-render-clear">Clear Generated Panels</button>
+            </div>
+            <pre id="dashboard-json-render-output"></pre>
           </article>
 
           <article class="panel">
