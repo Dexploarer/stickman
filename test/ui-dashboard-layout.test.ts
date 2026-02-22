@@ -65,6 +65,21 @@ describe("dashboard workbench layout", () => {
     expect(webStyles).toContain(".cowork-grid {");
   });
 
+  it("uses blueprint shell naming and removes legacy perplexity clone identifiers", () => {
+    expect(dashboardAppSource).toContain("const BLUEPRINT_SHELL_MODE = true");
+    expect(dashboardAppSource).toContain("initBlueprintShell()");
+    expect(dashboardAppSource).toContain("blueprint-shell-root");
+    expect(dashboardAppSource).toContain("blueprintShellReady");
+    expect(dashboardAppSource).toContain("Prompt or Die");
+    expect(dashboardAppSource).not.toContain("PERPLEXITY_CLONE_MODE");
+    expect(dashboardAppSource).not.toContain("perplexityShellReady");
+
+    expect(webStyles).toContain(".blueprint-shell-root {");
+    expect(webStyles).toContain(".blueprint-shell-root::before");
+    expect(webStyles).toContain(".blueprint-shell-root .blueprint-legacy-node");
+    expect(webStyles).not.toContain(".perplexity-clone-root");
+  });
+
   it("keeps social + X panels and removes coding-focused surface ids", () => {
     expect(dashboardHtml).toContain("id=\"login-form\"");
     expect(dashboardHtml).toContain("id=\"tweet-form\"");

@@ -14,6 +14,7 @@ import {
 const HISTORY_KEY = "prompt-or-die-social-suite.history.v1";
 const COWORK_CHAT_KEY = "prompt-or-die-social-suite.cowork.chat.v1";
 const MAX_HISTORY = 50;
+const BLUEPRINT_SHELL_MODE = true;
 const DASHBOARD_LAYOUT_KEY = "prompt-or-die-social-suite.dashboard.layout.v1";
 const DASHBOARD_VIEW_KEY = "prompt-or-die-social-suite.dashboard.view.v1";
 const DASHBOARD_CUSTOM_PANELS_KEY = "prompt-or-die-social-suite.dashboard.custom-panels.v1";
@@ -1033,6 +1034,10 @@ const applyDashboardJsonRenderSpec = (spec) => {
 };
 
 const initDashboardWorkbench = () => {
+  if (BLUEPRINT_SHELL_MODE) {
+    initBlueprintShell();
+    return;
+  }
   const root = $("dashboard-root");
   if (!root || root.dataset.workbenchReady === "true") {
     return;
@@ -2003,6 +2008,7 @@ const addCoworkMessage = (role, text) => {
 const renderCoworkChat = () => {
   const node = $("cowork-chat-log");
   if (!node) {
+    renderBlueprintChatPreview();
     return;
   }
   node.innerHTML = "";
@@ -2011,6 +2017,7 @@ const renderCoworkChat = () => {
     empty.className = "cowork-msg";
     empty.innerHTML = "<strong>System</strong>Dispatch tasks from here to run agent cowork flows.";
     node.appendChild(empty);
+    renderBlueprintChatPreview();
     return;
   }
   state.coworkMessages.forEach((message) => {
@@ -2024,6 +2031,7 @@ const renderCoworkChat = () => {
     node.appendChild(item);
   });
   node.scrollTop = node.scrollHeight;
+  renderBlueprintChatPreview();
 };
 
 const renderCoworkConversations = () => {
@@ -2059,6 +2067,253 @@ const renderCoworkConversations = () => {
   });
 };
 
+const ellipsizeText = (value, maxLength = 66) => {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength - 1)}...`;
+};
+
+const deriveBlueprintThreadTitle = (entry) => {
+  const args = entry?.args && typeof entry.args === "object" && !Array.isArray(entry.args) ? entry.args : {};
+  const candidate = [
+    args.prompt,
+    args.task,
+    args.query,
+    args.goal,
+    args.text,
+    args.handle,
+    args.username,
+  ].find((item) => typeof item === "string" && item.trim());
+  if (candidate) {
+    return ellipsizeText(candidate, 62);
+  }
+  const endpoint = String(entry?.endpoint || "thread").replace(/[_-]+/g, " ").trim();
+  return ellipsizeText(endpoint || "thread", 62);
+};
+
+const renderBlueprintThreadList = () => {
+  const list = $("pplx-thread-list");
+  if (!(list instanceof HTMLElement)) {
+    return;
+  }
+  list.innerHTML = "";
+  const rows = state.history.slice(0, 16);
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "pplx-thread-empty";
+    empty.textContent = "No threads yet. Ask anything to start.";
+    list.appendChild(empty);
+    return;
+  }
+  rows.forEach((item, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "pplx-thread-item";
+    button.dataset.pplxHistoryIndex = String(index);
+    button.textContent = deriveBlueprintThreadTitle(item);
+    list.appendChild(button);
+  });
+};
+
+const renderBlueprintChatPreview = () => {
+  const node = $("pplx-chat-preview");
+  if (!(node instanceof HTMLElement)) {
+    return;
+  }
+  const latest = [...state.coworkMessages].reverse().find((item) => typeof item?.text === "string" && item.text.trim());
+  if (!latest) {
+    node.textContent = "Ask anything to run a social mission, build a draft, or capture context.";
+    return;
+  }
+  const role = latest.role === "user" ? "You" : latest.role === "agent" ? "Agent" : "System";
+  node.textContent = `${role}: ${ellipsizeText(latest.text, 240)}`;
+};
+
+const initBlueprintShell = () => {
+  if (!BLUEPRINT_SHELL_MODE) {
+    return;
+  }
+  const root = $("dashboard-root");
+  if (!(root instanceof HTMLElement) || root.dataset.blueprintShellReady === "true") {
+    return;
+  }
+  root.dataset.blueprintShellReady = "true";
+  root.classList.add("blueprint-shell-root");
+
+  [...root.children].forEach((child) => {
+    if (!(child instanceof HTMLElement)) {
+      return;
+    }
+    child.classList.add("blueprint-legacy-node");
+    child.setAttribute("aria-hidden", "true");
+  });
+
+  const shell = document.createElement("div");
+  shell.id = "pplx-shell";
+  shell.className = "pplx-shell";
+  shell.innerHTML = `
+    <aside class="pplx-sidebar">
+      <div class="pplx-sidebar-top">
+        <div class="pplx-brand">
+          <span class="pplx-brand-mark">✣</span>
+          <span class="pplx-brand-name">Prompt or Die</span>
+        </div>
+        <button type="button" class="pplx-sidebar-toggle" aria-label="Toggle sidebar">⋮</button>
+      </div>
+      <button type="button" id="pplx-new-thread" class="pplx-new-thread">New Thread</button>
+      <nav class="pplx-nav">
+        <button type="button" class="pplx-nav-item active" data-pplx-nav="home"><span>⌕</span>Home</button>
+        <button type="button" class="pplx-nav-item" data-pplx-nav="discover"><span>⊕</span>Discover</button>
+        <button type="button" class="pplx-nav-item" data-pplx-nav="spaces"><span>✦</span>Spaces</button>
+        <button type="button" class="pplx-nav-item" data-pplx-nav="library"><span>⌂</span>Library</button>
+      </nav>
+      <div id="pplx-thread-list" class="pplx-thread-list"></div>
+      <div class="pplx-sidebar-footer">
+        <button type="button" class="pplx-shortcuts">⌘ Shortcuts</button>
+        <div class="pplx-user-row">
+          <span class="pplx-user-badge">S</span>
+          <span class="pplx-user-name">Social Suite <small>live</small></span>
+          <span class="pplx-user-gear">⚙</span>
+        </div>
+      </div>
+    </aside>
+    <section class="pplx-main">
+      <div class="pplx-center-mark" aria-hidden="true">
+        <span>✣</span>
+      </div>
+      <form id="pplx-composer-form" class="pplx-composer">
+        <label class="pplx-composer-label" for="pplx-composer-input">Ask anything...</label>
+        <textarea id="pplx-composer-input" rows="1" placeholder="Ask anything..."></textarea>
+        <div class="pplx-composer-row">
+          <div class="pplx-composer-left">
+            <button class="pplx-mini-btn active" type="button" data-pplx-tool="search" aria-label="Search">⌕</button>
+            <button class="pplx-mini-btn" type="button" data-pplx-tool="reason" aria-label="Reason">⟳</button>
+            <button class="pplx-mini-btn" type="button" data-pplx-tool="focus" aria-label="Focus">⌂</button>
+          </div>
+          <div class="pplx-composer-right">
+            <button class="pplx-icon-btn" type="button" data-pplx-tool="model" aria-label="Model">◫</button>
+            <button class="pplx-icon-btn" type="button" data-pplx-tool="web" aria-label="Web">◌</button>
+            <button class="pplx-icon-btn" type="button" data-pplx-tool="attach" aria-label="Attach">⌘</button>
+            <button class="pplx-icon-btn" type="button" data-pplx-tool="voice" aria-label="Voice">◉</button>
+            <button class="pplx-icon-btn" type="button" id="pplx-send-btn" aria-label="Send">➤</button>
+          </div>
+        </div>
+      </form>
+      <div id="pplx-chat-preview" class="pplx-chat-preview"></div>
+    </section>
+  `;
+  root.appendChild(shell);
+
+  const navButtons = [...shell.querySelectorAll("[data-pplx-nav]")];
+  navButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      navButtons.forEach((entry) => entry.classList.remove("active"));
+      button.classList.add("active");
+      const navId = String(button.getAttribute("data-pplx-nav") || "home");
+      if (navId === "library") {
+        $("utility-rail-toggle")?.click();
+      } else if (navId === "spaces") {
+        $("cowork-mission-query")?.focus();
+      } else if (navId === "discover") {
+        const input = $("pplx-composer-input");
+        if (input instanceof HTMLTextAreaElement) {
+          input.value = "Find current high-signal X trends for AI agents and suggest three post angles.";
+          input.focus();
+        }
+      }
+    });
+  });
+
+  const runBlueprintSubmit = () => {
+    const promptNode = $("pplx-composer-input");
+    const task = (promptNode instanceof HTMLTextAreaElement ? promptNode.value : "").trim();
+    if (!task) {
+      return;
+    }
+    const taskInput = $("cowork-task-input");
+    if (taskInput instanceof HTMLTextAreaElement) {
+      taskInput.value = task;
+    }
+    const coworkForm = $("cowork-form");
+    if (coworkForm instanceof HTMLFormElement) {
+      coworkForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    }
+    if (promptNode instanceof HTMLTextAreaElement) {
+      promptNode.value = "";
+    }
+  };
+
+  $("pplx-composer-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    runBlueprintSubmit();
+  });
+
+  $("pplx-composer-input")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      runBlueprintSubmit();
+    }
+  });
+
+  $("pplx-send-btn")?.addEventListener("click", () => {
+    runBlueprintSubmit();
+  });
+
+  $("pplx-new-thread")?.addEventListener("click", () => {
+    state.coworkMessages = [];
+    saveCoworkMessages();
+    renderCoworkChat();
+    renderBlueprintChatPreview();
+    const input = $("pplx-composer-input");
+    if (input instanceof HTMLTextAreaElement) {
+      input.value = "";
+      input.focus();
+    }
+  });
+
+  $("pplx-thread-list")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const row = target.closest("[data-pplx-history-index]");
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+    const index = Number(row.dataset.pplxHistoryIndex);
+    const entry = Number.isFinite(index) ? state.history[index] : null;
+    if (!entry) {
+      return;
+    }
+    const prompt = deriveBlueprintThreadTitle(entry);
+    const input = $("pplx-composer-input");
+    if (input instanceof HTMLTextAreaElement) {
+      input.value = prompt;
+      input.focus();
+    }
+  });
+
+  shell.querySelectorAll("[data-pplx-tool]").forEach((node) => {
+    node.addEventListener("click", () => {
+      const toolId = String(node.getAttribute("data-pplx-tool") || "").trim();
+      if (toolId === "attach") {
+        openContextPicker(contextPayloadFromSelection("blueprint-toolbar"));
+      } else if (toolId === "web") {
+        $("workflow-run")?.focus();
+      } else if (toolId === "model") {
+        $("provider-refresh")?.click();
+      } else if (toolId === "voice") {
+        $("ai-form")?.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    });
+  });
+
+  renderBlueprintThreadList();
+  renderBlueprintChatPreview();
+};
+
 const recordHistory = (entry) => {
   state.history.unshift({
     at: timestamp(),
@@ -2073,6 +2328,7 @@ const recordHistory = (entry) => {
 const renderHistory = () => {
   const container = $("history-list");
   if (!container) {
+    renderBlueprintThreadList();
     return;
   }
   container.innerHTML = "";
@@ -2081,6 +2337,7 @@ const renderHistory = () => {
     empty.className = "history-item";
     empty.textContent = "No runs yet.";
     container.appendChild(empty);
+    renderBlueprintThreadList();
     return;
   }
 
@@ -2109,6 +2366,7 @@ const renderHistory = () => {
 
     container.appendChild(node);
   });
+  renderBlueprintThreadList();
 };
 
 const apiGet = async (url) => {
@@ -2971,6 +3229,11 @@ const getGlobalArgs = () => {
 const setOnboardingVisibility = (showOnboarding) => {
   $("onboarding-root")?.classList.toggle("hidden", !showOnboarding);
   $("dashboard-root")?.classList.toggle("hidden", showOnboarding);
+  document.body.classList.toggle("dashboard-visible", !showOnboarding);
+  document.body.classList.toggle("onboarding-visible", Boolean(showOnboarding));
+  if (!showOnboarding) {
+    initBlueprintShell();
+  }
 };
 
 const updatePordieScopeHint = () => {
