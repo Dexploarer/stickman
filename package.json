@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "bun src/server.ts",
     "build:server": "bunx tsc --outDir dist",
+    "ui:tailwind:build": "./node_modules/.bin/tailwindcss -c tailwind.config.cjs -i ./web/tailwind.input.css -o ./web/tailwind.generated.css --minify",
     "electron:dev": "PORT=8788 POD_APP_URL=http://127.0.0.1:8788 OPENROUTER_HTTP_REFERER=http://localhost:8788 electron electron/main.cjs",
     "electron:attach": "POD_ELECTRON_START_SERVER=false electron electron/main.cjs",
     "electron:package:mac": "bun run build:server && bunx electron-builder --mac dmg --publish never -c.asar=false -c.extraMetadata.main=electron/main.cjs -c.mac.identity=null -c.directories.output=dist-installer",
@@ -43,6 +44,7 @@
     "@types/node": "^24.3.0",
     "@types/prompts": "^2.4.9",
     "electron": "^33.2.1",
+    "tailwindcss": "^3.4.17",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   },

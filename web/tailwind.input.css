@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  .tw-body {
+    @apply bg-pod-950 text-slate-100 antialiased;
+  }
+}
+
+@layer components {
+  .tw-dev-grid {
+    @apply grid gap-4 md:grid-cols-2 2xl:grid-cols-4;
+  }
+
+  .tw-dev-card {
+    @apply flex min-h-0 flex-col gap-3 rounded-2xl border border-pod-700/55 bg-gradient-to-b from-pod-900/80 to-pod-950/95 p-4 shadow-pod-panel;
+  }
+
+  .tw-dev-card-head {
+    @apply flex items-center justify-between gap-2 border-b border-pod-700/45 pb-2;
+  }
+
+  .tw-dev-card h3 {
+    @apply font-display text-xs uppercase tracking-[0.18em] text-pod-300;
+  }
+
+  .tw-btn-small {
+    @apply px-2 py-1 text-[0.65rem] tracking-[0.1em];
+  }
+
+  .panel-dev-workbench pre {
+    @apply max-h-56 overflow-auto;
+  }
+
+  .panel-dev-workbench textarea,
+  .panel-dev-workbench select,
+  .panel-dev-workbench input {
+    @apply font-mono text-xs;
+  }
+}
+

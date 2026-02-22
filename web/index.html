@@ -10,15 +10,16 @@
       href="https://fonts.googleapis.com/css2?family=Anek+Latin:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/tailwind.generated.css?v=tw-v1" />
+    <link rel="stylesheet" href="/styles.css?v=ide-v2" />
   </head>
-  <body>
+  <body class="tw-body">
     <div class="ambient"></div>
     <div id="desktop-drag-region" class="desktop-drag-region hidden" aria-hidden="true">
       <span class="desktop-drag-title">Prompt or Die Social Suite</span>
       <span id="desktop-drag-status" class="desktop-drag-status">Desktop shell inactive</span>
     </div>
-    <main class="shell">
+    <main class="app-shell">
       <header class="hero">
         <div class="hero-content">
           <span class="hero-kicker">Milady Social Suite</span>
@@ -289,30 +290,31 @@
       <section id="dashboard-root" class="ide-shell hidden dashboard-shell">
         <header class="ide-topbar">
           <div class="ide-topbar-left">
-            <strong class="ide-topbar-title">Milady Social IDE</strong>
+            <strong class="ide-topbar-title">dizzydo</strong>
             <span id="ide-top-health" class="ide-pill">API: checking</span>
-            <span id="ide-top-onboarding" class="ide-pill">Onboarding: checking</span>
           </div>
           <div class="ide-topbar-right">
-            <span class="ide-hint">Cmd/Ctrl+Shift+P Palette</span>
-            <span class="ide-hint">Cmd/Ctrl+Shift+K Context</span>
+            <span class="ide-pill ide-pill-cost">$0.24</span>
+            <span class="ide-pill ide-pill-running">running</span>
+            <span id="ide-top-onboarding" class="ide-pill">Onboarding: checking</span>
+            <button class="ghost ide-toolbar-btn" type="button" id="context-send-btn">Context</button>
             <button class="ghost ide-toolbar-btn" type="button" id="ide-toggle-left">Sidebar</button>
             <button class="ghost ide-toolbar-btn" type="button" id="ide-toggle-right">Inspector</button>
             <button class="ghost ide-toolbar-btn" type="button" id="ide-toggle-bottom">Output</button>
           </div>
         </header>
 
-        <div class="ide-workspace">
-          <nav id="ide-activity-rail" class="ide-activity-rail" aria-label="Activity">
-            <button class="ide-activity-btn active" type="button" data-ide-activity="cowork" title="Co-Work" aria-label="Co-Work">⌂</button>
-            <button class="ide-activity-btn" type="button" data-ide-activity="compose" title="Compose" aria-label="Compose">✎</button>
-            <button class="ide-activity-btn" type="button" data-ide-activity="planner" title="Planner" aria-label="Planner">⌘</button>
-            <button class="ide-activity-btn" type="button" data-ide-activity="integrations" title="Integrations" aria-label="Integrations">⎇</button>
-            <button class="ide-activity-btn" type="button" data-ide-activity="approvals" title="Approvals" aria-label="Approvals">⚑</button>
-            <button class="ide-activity-btn" type="button" data-ide-activity="skills" title="Skills" aria-label="Skills">✦</button>
-            <button class="ide-activity-btn" type="button" data-ide-activity="settings" title="Settings" aria-label="Settings">⚙</button>
-          </nav>
+        <nav id="ide-activity-rail" class="ide-activity-rail ide-nav-row" aria-label="Navigation">
+          <button class="ide-activity-btn active" type="button" data-ide-activity="cowork" title="Chat" aria-label="Chat">Chat</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="compose" title="Character" aria-label="Character">Character</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="planner" title="Inventory" aria-label="Inventory">Inventory</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="integrations" title="Knowledge" aria-label="Knowledge">Knowledge</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="approvals" title="Connectors" aria-label="Connectors">Connectors</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="skills" title="Apps" aria-label="Apps">Apps</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="settings" title="Advanced" aria-label="Advanced">Advanced</button>
+        </nav>
 
+        <div class="ide-workspace">
           <aside id="ide-left-dock" class="stack ide-dock ide-left-dock ide-sidebar">
           <div id="ide-left-tabs" class="ide-tabbar" role="tablist" aria-label="Operations panes"></div>
           <article id="runtime-controls-panel" class="panel" data-ide-pane data-ide-label="Runtime">
@@ -589,6 +591,7 @@
             </div>
             <div class="cowork-grid">
               <section class="cowork-lane">
+                <button class="cowork-new-chat-btn" type="button" id="cowork-new-chat">+ New Chat</button>
                 <h3>Conversations</h3>
                 <div id="cowork-conversations" class="history-list"></div>
               </section>
@@ -673,7 +676,7 @@
 
               </section>
               <section class="cowork-lane">
-                <h3>Live Agent Observer</h3>
+                <h3>Autonomous Loop</h3>
                 <div class="button-row">
                   <button class="ghost" type="button" id="cowork-live-refresh">Refresh Stream</button>
                   <button class="ghost" type="button" id="cowork-watch-active">Watch Active Task</button>
@@ -732,6 +735,137 @@
               <div id="endpoint-args" class="arg-grid"></div>
               <button type="submit">Run Endpoint</button>
             </form>
+          </article>
+
+          <article id="dev-workbench-panel" class="panel panel-dev-workbench" data-ide-pane data-ide-label="Dev Workbench">
+            <h2>Dev Workbench</h2>
+            <p class="summary">
+              Unified controls for workspace files, git actions, code execution approvals, and terminal PTY streaming.
+            </p>
+            <div class="tw-dev-grid">
+              <section class="tw-dev-card">
+                <div class="tw-dev-card-head">
+                  <h3>Workspace Files</h3>
+                  <button class="ghost tw-btn-small" type="button" id="dev-workspace-tree-refresh">Refresh Tree</button>
+                </div>
+                <label>Directory path (workspace-relative)</label>
+                <input id="dev-workspace-path" type="text" placeholder="src" />
+                <label>Directory entries</label>
+                <select id="dev-workspace-entry-select" size="8"></select>
+                <div class="button-row">
+                  <button class="ghost" type="button" id="dev-workspace-open-entry">Open Selection</button>
+                  <button class="ghost" type="button" id="dev-workspace-file-read">Read File</button>
+                </div>
+                <label>File path</label>
+                <input id="dev-workspace-file-path" type="text" placeholder="src/server.ts" />
+                <label>File contents</label>
+                <textarea id="dev-workspace-file-content" rows="9" spellcheck="false"></textarea>
+                <label>Base SHA256</label>
+                <input id="dev-workspace-base-sha" type="text" readonly />
+                <label>Confirm token</label>
+                <input id="dev-workspace-confirm-token" type="text" placeholder="generated by dry run" />
+                <div class="button-row">
+                  <button class="ghost" type="button" id="dev-workspace-write-dry-run">Dry Run Write</button>
+                  <button type="button" id="dev-workspace-write-execute">Execute Write</button>
+                </div>
+                <pre id="dev-workspace-tree-output"></pre>
+                <pre id="dev-workspace-output"></pre>
+              </section>
+
+              <section class="tw-dev-card">
+                <div class="tw-dev-card-head">
+                  <h3>Git Control</h3>
+                  <button class="ghost tw-btn-small" type="button" id="dev-git-refresh">Status + Log</button>
+                </div>
+                <div class="button-row">
+                  <button class="ghost" type="button" id="dev-git-status">Status</button>
+                  <button class="ghost" type="button" id="dev-git-diff">Diff</button>
+                  <button class="ghost" type="button" id="dev-git-log">Log</button>
+                </div>
+                <label>Diff path filter (optional)</label>
+                <input id="dev-git-diff-path" type="text" placeholder="web/index.html" />
+                <label>Log limit</label>
+                <input id="dev-git-log-limit" type="number" min="1" max="200" value="25" />
+                <label>Action</label>
+                <select id="dev-git-action">
+                  <option value="create_branch">create_branch</option>
+                  <option value="commit">commit</option>
+                  <option value="push">push</option>
+                </select>
+                <label>Branch name (create_branch)</label>
+                <input id="dev-git-branch-name" type="text" placeholder="codex/feature-ui-integrations" />
+                <label>Commit message (commit)</label>
+                <input id="dev-git-commit-message" type="text" placeholder="feat(ui): add dev workbench controls" />
+                <div class="toggle-row">
+                  <label><input id="dev-git-checkout" type="checkbox" checked /> checkout after branch create</label>
+                  <label><input id="dev-git-add-all" type="checkbox" checked /> add all before commit</label>
+                  <label><input id="dev-git-set-upstream" type="checkbox" checked /> set upstream on push</label>
+                </div>
+                <label>Confirm token</label>
+                <input id="dev-git-confirm-token" type="text" placeholder="generated by dry run" />
+                <div class="button-row">
+                  <button class="ghost" type="button" id="dev-git-action-dry-run">Dry Run Action</button>
+                  <button type="button" id="dev-git-action-execute">Execute Action</button>
+                </div>
+                <pre id="dev-git-output"></pre>
+              </section>
+
+              <section class="tw-dev-card">
+                <div class="tw-dev-card-head">
+                  <h3>Code Agent</h3>
+                  <button class="ghost tw-btn-small" type="button" id="dev-code-refresh">Refresh Code Status</button>
+                </div>
+                <label>Plan task</label>
+                <textarea id="dev-code-plan-task" rows="3" placeholder="Implement safe command execution UI for git + workspace."></textarea>
+                <label>Plan context (optional)</label>
+                <textarea id="dev-code-plan-context" rows="2" placeholder="Use existing API routes and preserve onboarding constraints."></textarea>
+                <button class="ghost" type="button" id="dev-code-plan-run">Generate Code Plan</button>
+                <label>Command</label>
+                <input id="dev-code-command" type="text" placeholder="bun test test/ui-dashboard-layout.test.ts" />
+                <label>CWD (optional)</label>
+                <input id="dev-code-cwd" type="text" placeholder="." />
+                <button type="button" id="dev-code-exec-run">Run Code Command</button>
+                <label>Code approval ID</label>
+                <input id="dev-code-approval-id" type="text" placeholder="approval id" />
+                <div class="button-row">
+                  <button class="ghost" type="button" id="dev-code-approval-refresh">Refresh Approvals</button>
+                  <button class="ghost" type="button" id="dev-code-approval-approve">Approve</button>
+                  <button class="ghost" type="button" id="dev-code-approval-reject">Reject</button>
+                </div>
+                <pre id="dev-code-status-output"></pre>
+                <pre id="dev-code-output"></pre>
+              </section>
+
+              <section class="tw-dev-card">
+                <div class="tw-dev-card-head">
+                  <h3>Terminal PTY</h3>
+                  <button class="ghost tw-btn-small" type="button" id="dev-terminal-refresh">Refresh Sessions</button>
+                </div>
+                <label>Session CWD (optional)</label>
+                <input id="dev-terminal-cwd" type="text" placeholder="." />
+                <div class="field-grid">
+                  <label>Cols</label>
+                  <input id="dev-terminal-cols" type="number" min="20" max="240" value="120" />
+                  <label>Rows</label>
+                  <input id="dev-terminal-rows" type="number" min="5" max="120" value="34" />
+                </div>
+                <div class="button-row">
+                  <button class="ghost" type="button" id="dev-terminal-create">Create Session</button>
+                  <button class="ghost" type="button" id="dev-terminal-connect">Connect Stream</button>
+                  <button class="ghost" type="button" id="dev-terminal-close">Close Session</button>
+                </div>
+                <label>Active session</label>
+                <select id="dev-terminal-session-select"></select>
+                <label>Terminal input</label>
+                <textarea id="dev-terminal-input" rows="2" placeholder="ls -la"></textarea>
+                <div class="toggle-row">
+                  <label><input id="dev-terminal-input-newline" type="checkbox" checked /> append newline</label>
+                </div>
+                <button type="button" id="dev-terminal-send">Send Input</button>
+                <pre id="dev-terminal-sessions-output"></pre>
+                <pre id="dev-terminal-stream-output"></pre>
+              </section>
+            </div>
           </article>
 
           <article id="planner-panel" class="panel split" data-ide-pane data-ide-label="Planner">
@@ -862,19 +996,19 @@
             <button class="ghost" type="button" id="utility-rail-toggle">Collapse</button>
           </div>
           <section class="sub-panel ide-inspector-module">
-            <h3>Task Summary</h3>
+            <h3>Current</h3>
             <pre id="ide-task-summary">No task data.</pre>
           </section>
           <section class="sub-panel ide-inspector-module">
-            <h3>Approval Queue Summary</h3>
+            <h3>Event Stream</h3>
             <pre id="ide-approval-summary">No approval data.</pre>
           </section>
           <section class="sub-panel ide-inspector-module">
-            <h3>Watch Session State</h3>
+            <h3>Goals</h3>
             <pre id="ide-watch-summary">No active watch session.</pre>
           </section>
           <section class="sub-panel ide-inspector-module">
-            <h3>Provider + Integration Health</h3>
+            <h3>Tasks</h3>
             <pre id="ide-provider-summary">Provider health unknown.</pre>
           </section>
           <p class="summary" id="context-mode-hint">Web fallback active: use Send Context or Cmd/Ctrl+Shift+K.</p>

@@ -17,13 +17,16 @@ describe("electron desktop shell", () => {
 });
 
 describe("dashboard ide workspace layout", () => {
-  it("boots from the ide workspace runtime path with v3 layout state", () => {
+  it("boots from the ide workspace runtime path with v5 layout state", () => {
     expect(dashboardAppSource).toContain("UI_LAYOUT_STATE_KEY");
+    expect(dashboardAppSource).toContain("ui-layout.v5");
     expect(dashboardAppSource).toContain("state.uiLayout = readUiLayoutState()");
     expect(dashboardAppSource).toContain("initIdeWorkspace()");
     expect(dashboardAppSource).toContain("setIdeActivityTab");
     expect(dashboardAppSource).toContain("setIdeCenterTab");
     expect(dashboardAppSource).toContain("runIdeWorkspaceAction");
+    expect(dashboardAppSource).toContain("leftSidebarCollapsed: true");
+    expect(dashboardAppSource).toContain("bottomRailCollapsed: true");
     expect(dashboardAppSource).toContain("centerSplitRatio: 0.72");
     expect(dashboardAppSource).toContain("rightInspectorCollapsed: true");
     expect(dashboardAppSource).not.toContain("initDashboardWorkbench();");
@@ -34,6 +37,7 @@ describe("dashboard ide workspace layout", () => {
     expect(dashboardHtml).toContain('id="dashboard-root" class="ide-shell');
     expect(dashboardHtml).toContain('class="ide-topbar"');
     expect(dashboardHtml).toContain('id="ide-activity-rail"');
+    expect(dashboardHtml).toContain('class="ide-activity-rail ide-nav-row"');
     expect(dashboardHtml).toContain('id="ide-left-dock"');
     expect(dashboardHtml).toContain('id="ide-center-tabs"');
     expect(dashboardHtml).toContain('id="ide-main-dock"');
@@ -48,14 +52,25 @@ describe("dashboard ide workspace layout", () => {
   it("ships IDE shell styling primitives and responsive viewer constraints", () => {
     expect(webStyles).toContain("#dashboard-root.ide-shell {");
     expect(webStyles).toContain(".ide-topbar");
-    expect(webStyles).toContain(".ide-activity-rail");
-    expect(webStyles).toContain(".ide-sidebar");
+    expect(webStyles).toContain("#ide-activity-rail");
+    expect(webStyles).toContain("#ide-left-dock");
     expect(webStyles).toContain(".ide-editor-surface");
-    expect(webStyles).toContain(".ide-inspector");
-    expect(webStyles).toContain(".ide-bottom-rail");
+    expect(webStyles).toContain("#dashboard-utility-rail");
+    expect(webStyles).toContain("#ide-bottom-rail");
     expect(webStyles).toContain("min-width: 900px");
     expect(webStyles).toContain("min-height: 600px");
-    expect(webStyles).toContain("@media (max-width: 1279px)");
+    expect(webStyles).toContain("@media (max-width: 1280px)");
+  });
+
+  it("applies single-shell milady-like ide grid and cowork viewer priority", () => {
+    expect(webStyles).toContain("body.dashboard-visible");
+    expect(webStyles).toContain("grid-template-columns: 56px minmax(250px, 300px) minmax(0, 1fr) minmax(280px, 320px)");
+    expect(webStyles).toContain("#dashboard-root .cowork-grid {");
+    expect(webStyles).toContain("grid-template-columns: minmax(900px, 72%) minmax(320px, 28%)");
+    expect(webStyles).toContain("#dashboard-root.ide-cowork-focus .cowork-grid");
+    expect(webStyles).toContain("#dashboard-root.ide-left-collapsed .ide-workspace");
+    expect(webStyles).toContain("#dashboard-root.ide-right-collapsed .ide-workspace");
+    expect(webStyles).toContain("#dashboard-root.ide-bottom-collapsed");
   });
 
   it("keeps social + agent feature wiring ids in the replacement shell", () => {

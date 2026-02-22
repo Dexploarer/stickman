@@ -17,7 +17,7 @@ const COWORK_VIEW_KEY = "prompt-or-die-social-suite.cowork.view.v3";
 const MAX_HISTORY = 50;
 const BLUEPRINT_WORKBENCH_MODE_KEY = "prompt-or-die-social-suite.blueprint.workbench-mode.v3";
 const IDE_DOCK_STATE_KEY = "prompt-or-die-social-suite.ide-dock.state.v3";
-const UI_LAYOUT_STATE_KEY = "prompt-or-die-social-suite.ui-layout.v3";
+const UI_LAYOUT_STATE_KEY = "prompt-or-die-social-suite.ui-layout.v5";
 const DASHBOARD_LAYOUT_KEY = "prompt-or-die-social-suite.dashboard.layout.v1";
 const DASHBOARD_VIEW_KEY = "prompt-or-die-social-suite.dashboard.view.v1";
 const DASHBOARD_CUSTOM_PANELS_KEY = "prompt-or-die-social-suite.dashboard.custom-panels.v1";
@@ -65,9 +65,9 @@ const UI_CENTER_TABS = Object.freeze([
 const UI_LAYOUT_DEFAULTS = Object.freeze({
   activeActivityTab: "cowork",
   activeCenterTab: "live_observer",
-  leftSidebarCollapsed: false,
+  leftSidebarCollapsed: true,
   rightInspectorCollapsed: true,
-  bottomRailCollapsed: false,
+  bottomRailCollapsed: true,
   centerSplitRatio: 0.72,
 });
 const DASHBOARD_PAGE_TABS = [
@@ -95,6 +95,7 @@ const DASHBOARD_PANEL_META_BY_TITLE = {
   "AI Chat Copilot": { page: "studio", segment: "tool" },
   "AI Image Copilot": { page: "studio", segment: "tool" },
   "X Algorithm OS Lab": { page: "studio", segment: "tool" },
+  "Dev Workbench": { page: "operations", segment: "tool" },
 };
 
 const state = {
@@ -150,6 +151,19 @@ const state = {
   dashboardJsonRenderSpec: null,
   dashboardJsonRenderDraft: null,
   approvalAutoApproveRules: {},
+  devWorkbench: {
+    workspaceTree: [],
+    workspacePath: "",
+    workspaceFilePath: "",
+    workspaceBaseSha: "",
+    workspaceConfirmToken: "",
+    gitConfirmToken: "",
+    codeStatus: null,
+    codeApprovals: [],
+    codeSessions: [],
+    terminalSessions: [],
+    terminalSessionId: "",
+  },
 };
 
 let runBlueprintCapabilityAction = async () => false;
@@ -195,6 +209,12 @@ const approvalModalState = {
   approvalId: "",
   actionKey: "",
   inFlight: false,
+};
+
+const devTerminalStreamState = {
+  socket: null,
+  sessionId: "",
+  lines: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -956,22 +976,18 @@ const buildGeneratedDashboardPanelNode = (element, index) => {
 };
 
 const hydrateGeneratedDashboardPanels = () => {
-  const root = $("dashboard-root");
-  if (!(root instanceof HTMLElement)) {
+  const mainDock = $("ide-main-dock");
+  if (!(mainDock instanceof HTMLElement)) {
     return;
   }
-  const rightColumn = root.querySelector(":scope > section.stack");
-  if (!(rightColumn instanceof HTMLElement)) {
-    return;
-  }
-  rightColumn.querySelectorAll(".generated-dashboard-panel").forEach((node) => node.remove());
+  mainDock.querySelectorAll(".generated-dashboard-panel").forEach((node) => node.remove());
   const spec = state.dashboardJsonRenderSpec;
   if (!spec || !Array.isArray(spec.elements)) {
     return;
   }
   spec.elements.forEach((element, index) => {
     const panel = buildGeneratedDashboardPanelNode(element, index);
-    rightColumn.appendChild(panel);
+    mainDock.appendChild(panel);
   });
   refreshIdeDockLayout();
 };
@@ -5279,6 +5295,456 @@ const refreshLivekitStatus = async () => {
   return result;
 };
 
+const buildQueryString = (params) => {
+  const pairs = Object.entries(params || {}).filter(([, value]) => value != null && String(value).trim() !== "");
+  if (!pairs.length) {
+    return "";
+  }
+  const query = new URLSearchParams();
+  pairs.forEach(([key, value]) => {
+    query.set(key, String(value));
+  });
+  return `?${query.toString()}`;
+};
+
+const setDevWorkbenchOutput = (outputId, value) => {
+  setText(outputId, value);
+};
+
+const renderDevWorkspaceEntries = () => {
+  const select = $("dev-workspace-entry-select");
+  if (!(select instanceof HTMLSelectElement)) {
+    return;
+  }
+  const current = String(select.value || "").trim();
+  const rows = Array.isArray(state.devWorkbench.workspaceTree) ? state.devWorkbench.workspaceTree : [];
+  select.innerHTML = "";
+  rows.forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.relPath;
+    option.textContent = `${entry.type === "dir" ? "📁" : "📄"} ${entry.relPath}`;
+    option.dataset.entryType = entry.type;
+    select.appendChild(option);
+  });
+  if (current) {
+    const existing = rows.find((entry) => entry.relPath === current);
+    if (existing) {
+      select.value = current;
+    }
+  }
+};
+
+const refreshDevWorkspaceTree = async () => {
+  const relDir = ($("dev-workspace-path")?.value || "").trim();
+  const result = await apiGet(`/api/workspace/tree${buildQueryString({ path: relDir || undefined })}`);
+  state.devWorkbench.workspacePath = String(result?.path || relDir || "");
+  state.devWorkbench.workspaceTree = Array.isArray(result?.entries) ? result.entries : [];
+  renderDevWorkspaceEntries();
+  setDevWorkbenchOutput("dev-workspace-tree-output", {
+    path: result?.path || relDir || ".",
+    count: state.devWorkbench.workspaceTree.length,
+    entries: state.devWorkbench.workspaceTree.map((entry) => ({
+      relPath: entry.relPath,
+      type: entry.type,
+      sizeBytes: entry.sizeBytes,
+    })),
+  });
+  return result;
+};
+
+const readDevWorkspaceFile = async (pathOverride) => {
+  const relPath = String(pathOverride || $("dev-workspace-file-path")?.value || "").trim();
+  if (!relPath) {
+    throw new Error("Workspace file path is required.");
+  }
+  const result = await apiGet(`/api/workspace/file${buildQueryString({ path: relPath })}`);
+  state.devWorkbench.workspaceFilePath = String(result?.path || relPath);
+  state.devWorkbench.workspaceBaseSha = String(result?.sha256 || "");
+  state.devWorkbench.workspaceConfirmToken = "";
+  if ($("dev-workspace-file-path")) {
+    $("dev-workspace-file-path").value = state.devWorkbench.workspaceFilePath;
+  }
+  if ($("dev-workspace-file-content")) {
+    $("dev-workspace-file-content").value = String(result?.content || "");
+  }
+  if ($("dev-workspace-base-sha")) {
+    $("dev-workspace-base-sha").value = state.devWorkbench.workspaceBaseSha;
+  }
+  if ($("dev-workspace-confirm-token")) {
+    $("dev-workspace-confirm-token").value = "";
+  }
+  setDevWorkbenchOutput("dev-workspace-output", {
+    path: result?.path,
+    sizeBytes: result?.sizeBytes,
+    sha256: result?.sha256,
+    mtime: result?.mtime,
+  });
+  return result;
+};
+
+const runDevWorkspaceWrite = async (mode) => {
+  const relPath = ($("dev-workspace-file-path")?.value || "").trim();
+  const content = $("dev-workspace-file-content")?.value || "";
+  const baseSha256 = ($("dev-workspace-base-sha")?.value || state.devWorkbench.workspaceBaseSha || "").trim();
+  const confirmToken = ($("dev-workspace-confirm-token")?.value || state.devWorkbench.workspaceConfirmToken || "").trim();
+  if (!relPath) {
+    throw new Error("Workspace file path is required.");
+  }
+  const payload = {
+    mode,
+    path: relPath,
+    content,
+    baseSha256,
+    confirmToken: mode === "execute" ? confirmToken || undefined : undefined,
+  };
+  const result = await apiPost("/api/workspace/file", payload);
+  if (mode === "dry_run") {
+    const token = String(result?.confirmToken || "").trim();
+    state.devWorkbench.workspaceConfirmToken = token;
+    if ($("dev-workspace-confirm-token")) {
+      $("dev-workspace-confirm-token").value = token;
+    }
+  } else {
+    const nextSha = String(result?.result?.sha256 || "").trim();
+    state.devWorkbench.workspaceConfirmToken = "";
+    state.devWorkbench.workspaceBaseSha = nextSha;
+    if ($("dev-workspace-confirm-token")) {
+      $("dev-workspace-confirm-token").value = "";
+    }
+    if ($("dev-workspace-base-sha")) {
+      $("dev-workspace-base-sha").value = nextSha;
+    }
+  }
+  setDevWorkbenchOutput("dev-workspace-output", result);
+  return result;
+};
+
+const refreshDevGitStatus = async () => {
+  const result = await apiGet("/api/git/status");
+  setDevWorkbenchOutput("dev-git-output", result);
+  return result;
+};
+
+const refreshDevGitDiff = async () => {
+  const relPath = ($("dev-git-diff-path")?.value || "").trim();
+  const result = await apiGet(`/api/git/diff${buildQueryString({ path: relPath || undefined })}`);
+  setDevWorkbenchOutput("dev-git-output", {
+    ok: result?.ok,
+    truncated: result?.truncated,
+    diff: result?.diff || "",
+  });
+  return result;
+};
+
+const refreshDevGitLog = async () => {
+  const limit = toInt($("dev-git-log-limit")?.value, 25);
+  const result = await apiGet(`/api/git/log${buildQueryString({ limit })}`);
+  setDevWorkbenchOutput("dev-git-output", result);
+  return result;
+};
+
+const resolveDevGitActionRequest = (mode) => {
+  const action = ($("dev-git-action")?.value || "").trim();
+  if (!action) {
+    throw new Error("Git action is required.");
+  }
+  const branchName = ($("dev-git-branch-name")?.value || "").trim();
+  const commitMessage = ($("dev-git-commit-message")?.value || "").trim();
+  const checkout = Boolean($("dev-git-checkout")?.checked);
+  const addAll = Boolean($("dev-git-add-all")?.checked);
+  const setUpstream = Boolean($("dev-git-set-upstream")?.checked);
+  const confirmToken = ($("dev-git-confirm-token")?.value || state.devWorkbench.gitConfirmToken || "").trim();
+  const params =
+    action === "create_branch"
+      ? {
+          name: branchName,
+          checkout,
+        }
+      : action === "commit"
+        ? {
+            message: commitMessage,
+            addAll,
+          }
+        : {
+            remote: "origin",
+            setUpstream,
+          };
+  return {
+    mode,
+    action,
+    params,
+    confirmToken: mode === "execute" ? confirmToken || undefined : undefined,
+  };
+};
+
+const runDevGitAction = async (mode) => {
+  const request = resolveDevGitActionRequest(mode);
+  const result = await apiPost("/api/git/actions", request);
+  if (mode === "dry_run") {
+    const token = String(result?.confirmToken || "").trim();
+    state.devWorkbench.gitConfirmToken = token;
+    if ($("dev-git-confirm-token")) {
+      $("dev-git-confirm-token").value = token;
+    }
+  } else {
+    state.devWorkbench.gitConfirmToken = "";
+    if ($("dev-git-confirm-token")) {
+      $("dev-git-confirm-token").value = "";
+    }
+  }
+  setDevWorkbenchOutput("dev-git-output", result);
+  await refreshDevGitStatus();
+  return result;
+};
+
+const refreshDevCodeStatus = async () => {
+  const [statusResult, approvalsResult, sessionsResult] = await Promise.all([
+    apiGet("/api/code/status"),
+    apiGet("/api/code/approvals"),
+    apiGet("/api/code/sessions"),
+  ]);
+  state.devWorkbench.codeStatus = statusResult || null;
+  state.devWorkbench.codeApprovals = Array.isArray(approvalsResult?.approvals) ? approvalsResult.approvals : [];
+  state.devWorkbench.codeSessions = Array.isArray(sessionsResult?.sessions) ? sessionsResult.sessions : [];
+  setDevWorkbenchOutput("dev-code-status-output", {
+    status: statusResult,
+    approvals: state.devWorkbench.codeApprovals,
+    sessions: state.devWorkbench.codeSessions.slice(0, 20),
+  });
+  return {
+    statusResult,
+    approvalsResult,
+    sessionsResult,
+  };
+};
+
+const runDevCodePlan = async () => {
+  const task = ($("dev-code-plan-task")?.value || "").trim();
+  const context = ($("dev-code-plan-context")?.value || "").trim();
+  if (!task) {
+    throw new Error("Plan task is required.");
+  }
+  const result = await apiPost("/api/code/plan", {
+    task,
+    context: context || undefined,
+  });
+  setDevWorkbenchOutput("dev-code-output", result);
+  return result;
+};
+
+const runDevCodeExec = async () => {
+  const command = ($("dev-code-command")?.value || "").trim();
+  const cwd = ($("dev-code-cwd")?.value || "").trim();
+  if (!command) {
+    throw new Error("Code command is required.");
+  }
+  const result = await apiPost("/api/code/exec", {
+    command,
+    cwd: cwd || undefined,
+  });
+  setDevWorkbenchOutput("dev-code-output", result);
+  await refreshDevCodeStatus();
+  return result;
+};
+
+const runDevCodeApprovalDecision = async (decision) => {
+  const approvalId = ($("dev-code-approval-id")?.value || "").trim();
+  if (!approvalId) {
+    throw new Error("Code approval ID is required.");
+  }
+  const result = await apiPost(`/api/code/approvals/${encodeURIComponent(approvalId)}/${decision}`, {});
+  setDevWorkbenchOutput("dev-code-output", result);
+  await refreshDevCodeStatus();
+  return result;
+};
+
+const appendDevTerminalStreamLine = (line) => {
+  const text = String(line || "").trim();
+  if (!text) {
+    return;
+  }
+  devTerminalStreamState.lines.push(text);
+  if (devTerminalStreamState.lines.length > 220) {
+    devTerminalStreamState.lines.splice(0, devTerminalStreamState.lines.length - 220);
+  }
+  setDevWorkbenchOutput("dev-terminal-stream-output", {
+    sessionId: devTerminalStreamState.sessionId || null,
+    lines: devTerminalStreamState.lines.slice(-80),
+  });
+};
+
+const closeDevTerminalStream = () => {
+  if (devTerminalStreamState.socket) {
+    try {
+      devTerminalStreamState.socket.close();
+    } catch {
+      // ignore
+    }
+  }
+  devTerminalStreamState.socket = null;
+  devTerminalStreamState.sessionId = "";
+};
+
+const connectDevTerminalStream = () => {
+  const sessionId = ($("dev-terminal-session-select")?.value || "").trim();
+  if (!sessionId) {
+    throw new Error("Terminal session is required.");
+  }
+  closeDevTerminalStream();
+  devTerminalStreamState.lines = [];
+  devTerminalStreamState.sessionId = sessionId;
+  appendDevTerminalStreamLine(`[terminal] connecting to ${sessionId}`);
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const socket = new WebSocket(`${protocol}://${window.location.host}/api/terminal/ws?sessionId=${encodeURIComponent(sessionId)}`);
+  devTerminalStreamState.socket = socket;
+  socket.onopen = () => {
+    appendDevTerminalStreamLine("[terminal] stream connected");
+  };
+  socket.onerror = () => {
+    appendDevTerminalStreamLine("[terminal] stream error");
+  };
+  socket.onclose = () => {
+    appendDevTerminalStreamLine("[terminal] stream closed");
+    devTerminalStreamState.socket = null;
+  };
+  socket.onmessage = (event) => {
+    const parsed = parseMaybeJSON(String(event.data || ""));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      appendDevTerminalStreamLine(String(event.data || ""));
+      return;
+    }
+    if (parsed.type === "terminal_bootstrap") {
+      appendDevTerminalStreamLine(`[bootstrap] cwd=${parsed.payload?.cwd || "?"} status=${parsed.payload?.status || "unknown"}`);
+      if (parsed.payload?.buffer) {
+        appendDevTerminalStreamLine(String(parsed.payload.buffer));
+      }
+      return;
+    }
+    if (parsed.type === "terminal_output") {
+      appendDevTerminalStreamLine(String(parsed.payload?.chunk || ""));
+      return;
+    }
+    if (parsed.type === "terminal_exit") {
+      appendDevTerminalStreamLine(`[exit] code=${parsed.payload?.exitCode ?? "unknown"}`);
+      return;
+    }
+    appendDevTerminalStreamLine(
+      `[${String(parsed.type || "event")}] ${compactPreview(parsed.payload, 260)}`,
+    );
+  };
+};
+
+const syncDevTerminalSessionSelect = () => {
+  const select = $("dev-terminal-session-select");
+  if (!(select instanceof HTMLSelectElement)) {
+    return;
+  }
+  const current = String(select.value || state.devWorkbench.terminalSessionId || "").trim();
+  const sessions = Array.isArray(state.devWorkbench.terminalSessions) ? state.devWorkbench.terminalSessions : [];
+  select.innerHTML = "";
+  sessions.forEach((session) => {
+    const option = document.createElement("option");
+    option.value = session.id;
+    option.textContent = `${session.id.slice(0, 8)}… ${session.status}${session.cwd ? ` · ${session.cwd}` : ""}`;
+    select.appendChild(option);
+  });
+  if (current) {
+    const exists = sessions.find((session) => session.id === current);
+    if (exists) {
+      select.value = current;
+    }
+  }
+  state.devWorkbench.terminalSessionId = String(select.value || "").trim();
+};
+
+const refreshDevTerminalSessions = async () => {
+  const result = await apiGet("/api/terminal/sessions");
+  state.devWorkbench.terminalSessions = Array.isArray(result?.sessions) ? result.sessions : [];
+  syncDevTerminalSessionSelect();
+  setDevWorkbenchOutput("dev-terminal-sessions-output", result);
+  return result;
+};
+
+const createDevTerminalSession = async () => {
+  const cwd = ($("dev-terminal-cwd")?.value || "").trim();
+  const cols = toInt($("dev-terminal-cols")?.value, 120);
+  const rows = toInt($("dev-terminal-rows")?.value, 34);
+  const result = await apiPost("/api/terminal/sessions", {
+    cwd: cwd || undefined,
+    cols,
+    rows,
+  });
+  await refreshDevTerminalSessions();
+  const sessionId = String(result?.session?.id || "").trim();
+  if (sessionId && $("dev-terminal-session-select")) {
+    $("dev-terminal-session-select").value = sessionId;
+    state.devWorkbench.terminalSessionId = sessionId;
+  }
+  connectDevTerminalStream();
+  return result;
+};
+
+const sendDevTerminalInput = async () => {
+  const sessionId = ($("dev-terminal-session-select")?.value || "").trim();
+  const inputRaw = $("dev-terminal-input")?.value || "";
+  if (!sessionId) {
+    throw new Error("Terminal session is required.");
+  }
+  if (!inputRaw.trim()) {
+    throw new Error("Terminal input is required.");
+  }
+  const appendNewline = Boolean($("dev-terminal-input-newline")?.checked);
+  const payload = {
+    data: appendNewline ? `${inputRaw.replace(/\r?\n$/, "")}\n` : inputRaw,
+  };
+  const result = await apiPost(`/api/terminal/sessions/${encodeURIComponent(sessionId)}/input`, payload);
+  appendDevTerminalStreamLine(`> ${payload.data.replace(/\r?\n$/, "")}`);
+  return result;
+};
+
+const closeDevTerminalSession = async () => {
+  const sessionId = ($("dev-terminal-session-select")?.value || "").trim();
+  if (!sessionId) {
+    throw new Error("Terminal session is required.");
+  }
+  const result = await apiPost(`/api/terminal/sessions/${encodeURIComponent(sessionId)}/close`, {});
+  if (devTerminalStreamState.sessionId === sessionId) {
+    closeDevTerminalStream();
+  }
+  await refreshDevTerminalSessions();
+  return result;
+};
+
+const refreshDevWorkbench = async () => {
+  const summary = {};
+  try {
+    summary.workspace = await refreshDevWorkspaceTree();
+  } catch (error) {
+    setDevWorkbenchOutput("dev-workspace-tree-output", error instanceof Error ? error.message : String(error));
+  }
+  try {
+    summary.gitStatus = await refreshDevGitStatus();
+  } catch (error) {
+    setDevWorkbenchOutput("dev-git-output", error instanceof Error ? error.message : String(error));
+  }
+  try {
+    summary.gitLog = await refreshDevGitLog();
+  } catch (error) {
+    setDevWorkbenchOutput("dev-git-output", error instanceof Error ? error.message : String(error));
+  }
+  try {
+    summary.code = await refreshDevCodeStatus();
+  } catch (error) {
+    setDevWorkbenchOutput("dev-code-status-output", error instanceof Error ? error.message : String(error));
+  }
+  try {
+    summary.terminal = await refreshDevTerminalSessions();
+  } catch (error) {
+    setDevWorkbenchOutput("dev-terminal-sessions-output", error instanceof Error ? error.message : String(error));
+  }
+  return summary;
+};
+
 const runIntegrationAppOpen = async (appId, url) => {
   const result = await apiPost("/api/mac/apps/open", {
     appId,
@@ -5440,7 +5906,7 @@ const getGlobalArgs = () => {
 
 const setOnboardingVisibility = (showOnboarding) => {
   $("onboarding-root")?.classList.toggle("hidden", !showOnboarding);
-  $("dashboard-root")?.classList.remove("hidden");
+  $("dashboard-root")?.classList.toggle("hidden", Boolean(showOnboarding));
   document.body.classList.toggle("dashboard-visible", true);
   document.body.classList.toggle("onboarding-visible", Boolean(showOnboarding));
   if (!showOnboarding) {
@@ -6789,6 +7255,16 @@ const bindDashboardEvents = () => {
     setText("cowork-output", "");
   });
 
+  $("cowork-new-chat")?.addEventListener("click", () => {
+    state.coworkMessages = [];
+    saveCoworkMessages();
+    renderCoworkChat();
+    if ($("cowork-task-input")) {
+      $("cowork-task-input").value = "";
+      $("cowork-task-input").focus();
+    }
+  });
+
   $("cowork-focus-toggle")?.addEventListener("click", () => {
     state.coworkView = {
       ...normalizeCoworkViewState(state.coworkView),
@@ -7687,6 +8163,222 @@ const bindDashboardEvents = () => {
     }
   });
 
+  $("dev-workspace-tree-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshDevWorkspaceTree();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-workspace-tree-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-workspace-open-entry")?.addEventListener("click", async () => {
+    const select = $("dev-workspace-entry-select");
+    if (!(select instanceof HTMLSelectElement)) {
+      return;
+    }
+    const selected = String(select.value || "").trim();
+    if (!selected) {
+      setDevWorkbenchOutput("dev-workspace-output", "Select a workspace entry first.");
+      return;
+    }
+    const selectedOption = select.options[select.selectedIndex];
+    const entryType = String(selectedOption?.dataset?.entryType || "").trim();
+    if (entryType === "dir") {
+      if ($("dev-workspace-path")) {
+        $("dev-workspace-path").value = selected;
+      }
+      try {
+        await refreshDevWorkspaceTree();
+      } catch (error) {
+        setDevWorkbenchOutput("dev-workspace-tree-output", error instanceof Error ? error.message : String(error));
+      }
+      return;
+    }
+    if ($("dev-workspace-file-path")) {
+      $("dev-workspace-file-path").value = selected;
+    }
+    try {
+      await readDevWorkspaceFile(selected);
+    } catch (error) {
+      setDevWorkbenchOutput("dev-workspace-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-workspace-file-read")?.addEventListener("click", async () => {
+    try {
+      await readDevWorkspaceFile();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-workspace-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-workspace-write-dry-run")?.addEventListener("click", async () => {
+    try {
+      await runDevWorkspaceWrite("dry_run");
+    } catch (error) {
+      setDevWorkbenchOutput("dev-workspace-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-workspace-write-execute")?.addEventListener("click", async () => {
+    try {
+      await runDevWorkspaceWrite("execute");
+    } catch (error) {
+      setDevWorkbenchOutput("dev-workspace-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-git-refresh")?.addEventListener("click", async () => {
+    try {
+      const [status, log] = await Promise.all([refreshDevGitStatus(), refreshDevGitLog()]);
+      setDevWorkbenchOutput("dev-git-output", {
+        status,
+        log,
+      });
+    } catch (error) {
+      setDevWorkbenchOutput("dev-git-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-git-status")?.addEventListener("click", async () => {
+    try {
+      await refreshDevGitStatus();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-git-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-git-diff")?.addEventListener("click", async () => {
+    try {
+      await refreshDevGitDiff();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-git-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-git-log")?.addEventListener("click", async () => {
+    try {
+      await refreshDevGitLog();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-git-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-git-action-dry-run")?.addEventListener("click", async () => {
+    try {
+      await runDevGitAction("dry_run");
+    } catch (error) {
+      setDevWorkbenchOutput("dev-git-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-git-action-execute")?.addEventListener("click", async () => {
+    try {
+      await runDevGitAction("execute");
+    } catch (error) {
+      setDevWorkbenchOutput("dev-git-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-code-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshDevCodeStatus();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-code-status-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-code-plan-run")?.addEventListener("click", async () => {
+    try {
+      await runDevCodePlan();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-code-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-code-exec-run")?.addEventListener("click", async () => {
+    try {
+      await runDevCodeExec();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-code-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-code-approval-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshDevCodeStatus();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-code-status-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-code-approval-approve")?.addEventListener("click", async () => {
+    try {
+      await runDevCodeApprovalDecision("approve");
+    } catch (error) {
+      setDevWorkbenchOutput("dev-code-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-code-approval-reject")?.addEventListener("click", async () => {
+    try {
+      await runDevCodeApprovalDecision("reject");
+    } catch (error) {
+      setDevWorkbenchOutput("dev-code-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-terminal-refresh")?.addEventListener("click", async () => {
+    try {
+      await refreshDevTerminalSessions();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-terminal-sessions-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-terminal-create")?.addEventListener("click", async () => {
+    try {
+      const result = await createDevTerminalSession();
+      setDevWorkbenchOutput("dev-terminal-sessions-output", result);
+    } catch (error) {
+      setDevWorkbenchOutput("dev-terminal-sessions-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-terminal-connect")?.addEventListener("click", () => {
+    try {
+      connectDevTerminalStream();
+    } catch (error) {
+      setDevWorkbenchOutput("dev-terminal-stream-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-terminal-send")?.addEventListener("click", async () => {
+    try {
+      const result = await sendDevTerminalInput();
+      setDevWorkbenchOutput("dev-terminal-sessions-output", result);
+    } catch (error) {
+      setDevWorkbenchOutput("dev-terminal-sessions-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-terminal-close")?.addEventListener("click", async () => {
+    try {
+      const result = await closeDevTerminalSession();
+      setDevWorkbenchOutput("dev-terminal-sessions-output", result);
+    } catch (error) {
+      setDevWorkbenchOutput("dev-terminal-sessions-output", error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  $("dev-terminal-session-select")?.addEventListener("change", () => {
+    state.devWorkbench.terminalSessionId = ($("dev-terminal-session-select")?.value || "").trim();
+    if (devTerminalStreamState.sessionId && devTerminalStreamState.sessionId !== state.devWorkbench.terminalSessionId) {
+      closeDevTerminalStream();
+      setDevWorkbenchOutput("dev-terminal-stream-output", "Terminal stream disconnected. Click Connect Stream for the selected session.");
+    }
+  });
+
   $("endpoint-filter")?.addEventListener("input", renderEndpointOptions);
   $("endpoint-select")?.addEventListener("change", renderEndpointArgs);
   [
@@ -8150,6 +8842,7 @@ const boot = async () => {
   await refreshIntegrationSubscribers();
   await refreshIntegrationBridgeStatus();
   await refreshTaskLogTail();
+  await refreshDevWorkbench();
   autoCollapseInspectorIfIdle({ persist: true });
   renderWatchObserverMeta();
   const initialWatchSession = resolveActiveWatchSession();
@@ -8163,6 +8856,7 @@ const boot = async () => {
         refreshApprovals(),
         refreshCoworkState(),
         refreshTaskLogTail(),
+        refreshDevCodeStatus(),
         refreshIntegrations(),
         refreshIntegrationBridgeStatus(),
         refreshIntegrationActionHistory(),
@@ -8177,4 +8871,8 @@ const boot = async () => {
 
 boot().catch((error) => {
   setText("activity-log", error instanceof Error ? error.message : String(error));
+});
+
+window.addEventListener("beforeunload", () => {
+  closeDevTerminalStream();
 });
