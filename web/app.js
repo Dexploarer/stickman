@@ -17,7 +17,7 @@ const COWORK_VIEW_KEY = "prompt-or-die-social-suite.cowork.view.v3";
 const MAX_HISTORY = 50;
 const BLUEPRINT_WORKBENCH_MODE_KEY = "prompt-or-die-social-suite.blueprint.workbench-mode.v3";
 const IDE_DOCK_STATE_KEY = "prompt-or-die-social-suite.ide-dock.state.v3";
-const UI_LAYOUT_STATE_KEY = "prompt-or-die-social-suite.ui-layout.v5";
+const UI_LAYOUT_STATE_KEY = "prompt-or-die-social-suite.ui-layout.v6";
 const DASHBOARD_LAYOUT_KEY = "prompt-or-die-social-suite.dashboard.layout.v1";
 const DASHBOARD_VIEW_KEY = "prompt-or-die-social-suite.dashboard.view.v1";
 const DASHBOARD_CUSTOM_PANELS_KEY = "prompt-or-die-social-suite.dashboard.custom-panels.v1";
@@ -66,7 +66,7 @@ const UI_LAYOUT_DEFAULTS = Object.freeze({
   activeActivityTab: "cowork",
   activeCenterTab: "live_observer",
   leftSidebarCollapsed: true,
-  rightInspectorCollapsed: true,
+  rightInspectorCollapsed: false,
   bottomRailCollapsed: true,
   centerSplitRatio: 0.72,
 });
@@ -3090,9 +3090,9 @@ const ACTIVITY_MAIN_PANE = Object.freeze({
   cowork: "",
   compose: "compose-panel",
   planner: "planner-panel",
-  integrations: "command-studio-panel",
-  approvals: "cowork-panel",
-  skills: "ai-chat-panel",
+  integrations: "ai-chat-panel",
+  approvals: "command-studio-panel",
+  skills: "media-copilot-panel",
   settings: "x-algo-panel",
 });
 
@@ -3272,6 +3272,16 @@ const setIdeActivityTab = (activityTab, { persist = true } = {}) => {
   } else if (next === "cowork" && !UI_CENTER_TABS.includes(updated.activeCenterTab)) {
     updated.activeCenterTab = "live_observer";
   }
+  if (next === "cowork") {
+    updated.leftSidebarCollapsed = true;
+    updated.bottomRailCollapsed = true;
+  } else if (next === "compose" || next === "planner") {
+    updated.leftSidebarCollapsed = true;
+  } else {
+    updated.leftSidebarCollapsed = false;
+    updated.bottomRailCollapsed = true;
+  }
+  updated.rightInspectorCollapsed = false;
   state.uiLayout = updated;
   applyUiLayoutState({ persist });
 };

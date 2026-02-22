@@ -12,6 +12,7 @@ const port = Number(process.env.PORT || 8787);
 const appUrl = process.env.POD_APP_URL || `http://127.0.0.1:${port}`;
 const shouldStartServer = process.env.POD_ELECTRON_START_SERVER !== "false";
 const ELECTRON_DOCS_URL = "https://www.electronjs.org/docs/latest/tutorial/examples";
+const WINDOW_LOAD_WATCHDOG_MS = 20_000;
 
 const DEFAULT_DESKTOP_PREFERENCES = Object.freeze({
   titleBarOverlayMode: "auto",
@@ -1397,6 +1398,23 @@ const rebuildApplicationMenu = () => {
 };
 
 const createMainWindow = () => {
+  let loadWatchdogTimer = null;
+  let startupFailureShown = false;
+  const clearLoadWatchdog = () => {
+    if (loadWatchdogTimer) {
+      clearTimeout(loadWatchdogTimer);
+      loadWatchdogTimer = null;
+    }
+  };
+  const showStartupFailure = (reason) => {
+    clearLoadWatchdog();
+    if (startupFailureShown) {
+      return;
+    }
+    startupFailureShown = true;
+    loadStartupFailurePage(reason);
+  };
+
   const overlayEnabled = resolveTitleBarOverlayEnabled(desktopPreferences);
   const windowOptions = {
     width: 1500,
@@ -1454,10 +1472,13 @@ const createMainWindow = () => {
   });
 
   mainWindow.on("closed", () => {
+    clearLoadWatchdog();
     mainWindow = null;
   });
 
   mainWindow.webContents.once("did-finish-load", () => {
+    clearLoadWatchdog();
+    startupFailureShown = false;
     sendDesktopCapabilities();
     sendDesktopPreferences();
     sendToRenderer("pod:desktop-commands", { commands: getPublicDesktopCommands() });
@@ -1476,10 +1497,35 @@ const createMainWindow = () => {
     }
     const reason = `Failed to load ${currentUrl || appUrl} (${errorCode}): ${errorDescription || "unknown error"}`;
     console.warn(`[electron] ${reason}`);
-    loadStartupFailurePage(reason);
+    showStartupFailure(reason);
   });
 
-  mainWindow.loadURL(appUrl);
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    if (!details || details.reason === "clean-exit") {
+      return;
+    }
+    const reason = `Renderer process exited unexpectedly (${details.reason || "unknown"}).`;
+    console.warn(`[electron] ${reason}`);
+    showStartupFailure(reason);
+  });
+
+  loadWatchdogTimer = setTimeout(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    const currentUrl = mainWindow.webContents.getURL();
+    const reason = `Dashboard did not finish loading within ${Math.round(WINDOW_LOAD_WATCHDOG_MS / 1000)}s (last URL: ${
+      currentUrl || appUrl
+    }).`;
+    console.warn(`[electron] ${reason}`);
+    showStartupFailure(reason);
+  }, WINDOW_LOAD_WATCHDOG_MS);
+
+  mainWindow.loadURL(appUrl).catch((error) => {
+    const reason = `Failed to initiate load for ${appUrl}: ${error instanceof Error ? error.message : String(error)}`;
+    console.warn(`[electron] ${reason}`);
+    showStartupFailure(reason);
+  });
 };
 
 ipcMain.handle("pod:get-app-info", () => ({

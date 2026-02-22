@@ -1267,6 +1267,8 @@ body.dashboard-visible {
   grid-template-rows: 42px 56px minmax(0, 1fr) !important;
   background: #17191d !important;
   border-top: 1px solid #2a2d33 !important;
+  position: relative;
+  overflow: hidden;
 }
 
 #dashboard-root.ide-shell .ide-topbar {
@@ -1356,12 +1358,41 @@ body.dashboard-visible {
   grid-column: 1 / -1 !important;
   grid-row: 3 !important;
   display: grid !important;
-  grid-template-columns: 0 minmax(0, 1fr) 420px !important;
+  grid-template-columns: minmax(0, 1fr) 420px !important;
   background: #181a1f !important;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
 }
 
 #dashboard-root.ide-shell #ide-left-dock {
-  display: none !important;
+  display: grid !important;
+  position: absolute !important;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(430px, 44vw);
+  transform: translateX(calc(-100% - 1px));
+  transition: transform 180ms ease;
+  z-index: 64;
+  border-right: 1px solid #2a2d33 !important;
+  background: #181c22 !important;
+  padding: 10px !important;
+  overflow: auto !important;
+}
+
+#dashboard-root.ide-shell:not(.ide-left-collapsed) #ide-left-dock {
+  transform: translateX(0);
+}
+
+#dashboard-root.ide-shell #ide-left-tabs {
+  position: sticky !important;
+  top: 0;
+  z-index: 3;
+  background: #1a1f27 !important;
+  border: 1px solid #313743 !important;
+  border-radius: 2px !important;
+  margin-bottom: 8px;
 }
 
 #dashboard-root.ide-shell .ide-editor-surface {
@@ -1612,7 +1643,26 @@ body.dashboard-visible {
 }
 
 #dashboard-root.ide-shell #ide-bottom-rail {
-  display: none !important;
+  display: grid !important;
+  position: absolute !important;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: min(42vh, 260px);
+  transform: translateY(calc(100% + 2px));
+  transition: transform 180ms ease;
+  z-index: 66;
+  background: #13161c !important;
+  border-top: 1px solid #2a2d33 !important;
+  padding: 8px !important;
+}
+
+#dashboard-root.ide-shell:not(.ide-bottom-collapsed) #ide-bottom-rail {
+  transform: translateY(0);
+}
+
+#dashboard-root.ide-shell #ide-bottom-rail .ide-bottom-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 }
 
 #dashboard-root.ide-shell.ide-right-collapsed {
