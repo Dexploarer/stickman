@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Milady Social Suite</title>
+    <title>Social Agent Studio</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/tailwind.generated.css?v=tw-v1" />
-    <link rel="stylesheet" href="/styles.css?v=ide-v2" />
+    <link rel="stylesheet" href="/styles.css?v=ide-v3" />
   </head>
   <body class="tw-body">
     <div class="ambient"></div>
@@ -22,8 +22,8 @@
     <main class="app-shell">
       <header class="hero">
         <div class="hero-content">
-          <span class="hero-kicker">Milady Social Suite</span>
-          <h1>Co-Work IDE</h1>
+          <span class="hero-kicker">Social Agent Studio</span>
+          <h1>Social Agent Studio</h1>
           <p>Command-first social operations workspace with full-size live observer and docked tool panes.</p>
         </div>
         <div class="hero-controls">
@@ -290,28 +290,31 @@
       <section id="dashboard-root" class="ide-shell hidden dashboard-shell">
         <header class="ide-topbar">
           <div class="ide-topbar-left">
-            <strong class="ide-topbar-title">dizzydo</strong>
+            <strong class="ide-topbar-title">Social Agent Studio</strong>
             <span id="ide-top-health" class="ide-pill">API: checking</span>
           </div>
           <div class="ide-topbar-right">
             <span class="ide-pill ide-pill-cost">$0.24</span>
             <span class="ide-pill ide-pill-running">running</span>
             <span id="ide-top-onboarding" class="ide-pill">Onboarding: checking</span>
-            <button class="ghost ide-toolbar-btn" type="button" id="context-send-btn">Context</button>
-            <button class="ghost ide-toolbar-btn" type="button" id="ide-toggle-left">Sidebar</button>
-            <button class="ghost ide-toolbar-btn" type="button" id="ide-toggle-right">Inspector</button>
-            <button class="ghost ide-toolbar-btn" type="button" id="ide-toggle-bottom">Output</button>
+            <button class="ghost ide-toolbar-btn ide-icon-btn" type="button" id="ide-runtime-pause" title="Pause refresh loop">II</button>
+            <button class="ghost ide-toolbar-btn ide-icon-btn" type="button" id="ide-runtime-restart" title="Refresh all systems">Restart</button>
+            <button class="ghost ide-toolbar-btn ide-icon-btn" type="button" id="ide-toggle-left" title="Tools drawer">Tools</button>
+            <button class="ghost ide-toolbar-btn ide-icon-btn" type="button" id="ide-toggle-right" title="Autonomous loop rail">Loop</button>
+            <button class="ghost ide-toolbar-btn ide-icon-btn" type="button" id="ide-toggle-bottom" title="Output drawer">Output</button>
+            <button class="ghost ide-toolbar-btn ide-icon-btn" type="button" id="context-send-btn" title="Send context">Cmd+K</button>
           </div>
         </header>
 
         <nav id="ide-activity-rail" class="ide-activity-rail ide-nav-row" aria-label="Navigation">
-          <button class="ide-activity-btn active" type="button" data-ide-activity="cowork" title="Chat" aria-label="Chat">Chat</button>
-          <button class="ide-activity-btn" type="button" data-ide-activity="compose" title="Character" aria-label="Character">Character</button>
-          <button class="ide-activity-btn" type="button" data-ide-activity="planner" title="Inventory" aria-label="Inventory">Inventory</button>
-          <button class="ide-activity-btn" type="button" data-ide-activity="integrations" title="Knowledge" aria-label="Knowledge">Knowledge</button>
-          <button class="ide-activity-btn" type="button" data-ide-activity="approvals" title="Connectors" aria-label="Connectors">Connectors</button>
-          <button class="ide-activity-btn" type="button" data-ide-activity="skills" title="Apps" aria-label="Apps">Apps</button>
-          <button class="ide-activity-btn" type="button" data-ide-activity="settings" title="Advanced" aria-label="Advanced">Advanced</button>
+          <button class="ide-activity-btn active" type="button" data-ide-activity="chat" title="Chat" aria-label="Chat">Chat</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="agent" title="Agent" aria-label="Agent">Agent</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="memory" title="Memory" aria-label="Memory">Memory</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="tools" title="Tools" aria-label="Tools">Tools</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="integrations" title="Integrations" aria-label="Integrations">Integrations</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="workflows" title="Workflows" aria-label="Workflows">Workflows</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="settings" title="Settings" aria-label="Settings">Settings</button>
+          <button class="ide-activity-btn" type="button" data-ide-activity="advanced" title="Advanced" aria-label="Advanced">Advanced</button>
         </nav>
 
         <div class="ide-workspace">
@@ -433,6 +436,76 @@
             <pre id="quick-output"></pre>
           </article>
 
+          <article id="memory-tools-panel" class="panel" data-ide-pane data-ide-label="Memory Tools">
+            <h2>Memory Tools</h2>
+            <p class="summary">Capture context, transform it, and route into planner/mission/command flows.</p>
+            <div class="button-grid">
+              <button class="ghost" type="button" data-utility-proxy="utility-source-use-selection">Use Selection</button>
+              <button class="ghost" type="button" data-utility-proxy="utility-source-use-latest">Use Latest</button>
+              <button class="ghost" type="button" data-context-transform="tighten">Tighten</button>
+              <button class="ghost" type="button" data-context-transform="threadify">Threadify</button>
+              <button class="ghost" type="button" data-context-transform="cta">CTA Variant</button>
+              <button class="ghost" type="button" data-utility-proxy="utility-prefill-planner">Prefill Planner</button>
+              <button class="ghost" type="button" data-utility-proxy="utility-prefill-mission">Prefill Mission</button>
+              <button class="ghost" type="button" data-utility-proxy="utility-prefill-command">Prefill Command</button>
+              <button class="ghost" type="button" data-utility-proxy="utility-archive-knowledge">Archive Knowledge</button>
+            </div>
+          </article>
+
+          <article id="tools-drawer-panel" class="panel" data-ide-pane data-ide-label="Tool Presets">
+            <h2>Tool Presets</h2>
+            <p class="summary">Quick-run command studio endpoints with one click.</p>
+            <label>Endpoint preset</label>
+            <select id="tools-preset-select">
+              <option value="trends">trends</option>
+              <option value="search">search</option>
+              <option value="stream_status">stream_status</option>
+              <option value="get_my_x_account_detail_v3">get_my_x_account_detail_v3</option>
+            </select>
+            <div class="button-row">
+              <button class="ghost" type="button" id="tools-preset-run">Run Preset</button>
+              <button class="ghost" type="button" id="tools-preset-open-live">Expand Live Viewer</button>
+            </div>
+            <pre id="tools-drawer-output">Tool presets ready.</pre>
+          </article>
+
+          <article id="integrations-drawer-panel" class="panel" data-ide-pane data-ide-label="Integrations Control">
+            <h2>Integrations Control</h2>
+            <p class="summary">Bridge/subscriber/livekit actions with direct runtime hooks.</p>
+            <div class="button-grid">
+              <button class="ghost" type="button" data-utility-proxy="integrations-refresh">Refresh Integrations</button>
+              <button class="ghost" type="button" data-utility-proxy="integration-bridge-refresh">Refresh Bridge</button>
+              <button class="ghost" type="button" data-utility-proxy="integration-subs-refresh">Refresh Subscribers</button>
+              <button class="ghost" type="button" data-utility-proxy="livekit-refresh">Refresh LiveKit</button>
+              <button class="ghost" type="button" data-utility-proxy="integration-open-antigravity">Open Antigravity</button>
+              <button class="ghost" type="button" data-utility-proxy="integration-open-chrome">Open Chrome</button>
+            </div>
+          </article>
+
+          <article id="workflows-drawer-panel" class="panel" data-ide-pane data-ide-label="Workflow Tools">
+            <h2>Workflow Tools</h2>
+            <p class="summary">Mission templates and task automation shortcuts.</p>
+            <div class="button-grid">
+              <button class="ghost" type="button" data-utility-proxy="cowork-mission-run">Run Selected Mission</button>
+              <button class="ghost" type="button" data-utility-proxy="cowork-mission-social">Run Social Mission</button>
+              <button class="ghost" type="button" data-utility-proxy="plan-import">Import Plan to Runner</button>
+              <button class="ghost" type="button" data-utility-proxy="workflow-run">Run Workflow Script</button>
+              <button class="ghost" type="button" data-utility-proxy="tasks-refresh">Refresh Task Board</button>
+            </div>
+          </article>
+
+          <article id="advanced-drawer-panel" class="panel" data-ide-pane data-ide-label="Advanced Controls">
+            <h2>Advanced Controls</h2>
+            <p class="summary">Dev workbench operations and approval management shortcuts.</p>
+            <div class="button-grid">
+              <button class="ghost" type="button" data-utility-proxy="dev-workspace-tree-refresh">Refresh Workspace Tree</button>
+              <button class="ghost" type="button" data-utility-proxy="dev-git-refresh">Refresh Git</button>
+              <button class="ghost" type="button" data-utility-proxy="dev-terminal-refresh">Refresh Terminal Sessions</button>
+              <button class="ghost" type="button" data-utility-proxy="approvals-refresh">Refresh Approvals</button>
+              <button class="ghost" type="button" data-utility-proxy="integration-actions-refresh">Refresh Integration Actions</button>
+            </div>
+          </article>
+
           <article id="layout-generator-panel" class="panel" data-ide-pane data-ide-label="Layout">
             <h2>Layout Generator</h2>
             <p class="summary">
@@ -545,6 +618,7 @@
               <button class="ghost" type="button" id="watch-sources-refresh">Refresh Watch Sources</button>
               <button class="ghost" type="button" id="watch-start">Start Watch</button>
               <button class="ghost" type="button" id="watch-stop">Stop Watch</button>
+              <button class="ghost" type="button" id="watch-expand-live">Expand Live Viewer</button>
             </div>
             <h3>LiveKit Remote Bridge (Optional)</h3>
             <div class="toggle-row">
@@ -572,11 +646,15 @@
           </aside>
 
           <section class="ide-editor-surface">
-            <div id="ide-center-tabs" class="ide-center-tabbar" role="tablist" aria-label="Center tabs">
-              <button type="button" class="ide-center-tab active" data-ide-center-tab="live_observer">Live Observer</button>
-              <button type="button" class="ide-center-tab" data-ide-center-tab="mission_console">Mission Console</button>
-              <button type="button" class="ide-center-tab" data-ide-center-tab="tweet_composer">Tweet Composer</button>
-            </div>
+            <header class="ide-view-header">
+              <div>
+                <strong id="ide-view-title">Chat</strong>
+                <p id="ide-view-subtitle">Co-work chat with direct command dispatch and focused interaction.</p>
+              </div>
+              <div class="ide-view-actions">
+                <button class="ghost" type="button" id="ide-view-refresh">Refresh View Data</button>
+              </div>
+            </header>
             <section id="ide-main-dock" class="stack ide-dock ide-main-dock ide-editor">
               <div id="ide-main-tabs" class="ide-tabbar ide-main-tabbar" role="tablist" aria-label="Workspace panes"></div>
           <article id="cowork-panel" class="panel cowork-panel" data-ide-pane data-ide-label="Co-Work">
@@ -608,6 +686,11 @@
                 <div id="cowork-metrics" class="cowork-metrics"></div>
                 <div id="cowork-chat-log" class="cowork-chat-log"></div>
                 <form id="cowork-form">
+                  <div class="cowork-mode-row">
+                    <span>MODE</span>
+                    <button class="ghost cowork-mode-btn active" type="button" data-cowork-mode="simple">Simple</button>
+                    <button class="ghost cowork-mode-btn" type="button" data-cowork-mode="power">Power</button>
+                  </div>
                   <label>Task for Agent</label>
                   <textarea id="cowork-task-input" rows="4" placeholder="Ask directly, or use slash commands (/status, /watch)." required></textarea>
                   <div class="toggle-row">
@@ -735,6 +818,79 @@
               <div id="endpoint-args" class="arg-grid"></div>
               <button type="submit">Run Endpoint</button>
             </form>
+          </article>
+
+          <article id="memory-panel" class="panel split" data-ide-pane data-ide-label="Memory">
+            <section>
+              <h2>Context Inbox</h2>
+              <p class="summary">Capture, inspect, and route context into social workflows.</p>
+              <div class="button-row">
+                <button class="ghost" type="button" id="utility-source-use-selection">Use Selection</button>
+                <button class="ghost" type="button" id="utility-source-use-latest">Use Latest</button>
+              </div>
+              <div id="context-inbox-list" class="context-inbox-list"></div>
+            </section>
+            <section>
+              <h2>Knowledge Shortcuts</h2>
+              <label>Source context</label>
+              <textarea id="context-rail-source" rows="7" placeholder="Paste or capture context for transforms and tool prefills."></textarea>
+              <div class="button-grid utility-transform-grid">
+                <button class="ghost" type="button" data-context-transform="tighten">Tighten</button>
+                <button class="ghost" type="button" data-context-transform="threadify">Threadify</button>
+                <button class="ghost" type="button" data-context-transform="cta">CTA Variant</button>
+              </div>
+              <div class="button-grid">
+                <button class="ghost" type="button" id="utility-prefill-planner">Prefill Planner Goal</button>
+                <button class="ghost" type="button" id="utility-prefill-mission">Prefill Mission Query</button>
+                <button class="ghost" type="button" id="utility-prefill-command">Prefill Command Studio</button>
+                <button class="ghost" type="button" id="utility-archive-knowledge">Archive to Knowledge</button>
+              </div>
+              <p class="summary" id="context-mode-hint">Context capture ready (Cmd/Ctrl+Shift+K).</p>
+              <p class="summary" id="context-feedback-line">Context tools ready.</p>
+            </section>
+          </article>
+
+          <article id="integrations-panel" class="panel split" data-ide-pane data-ide-label="Integrations">
+            <section>
+              <h2>Integrations Control</h2>
+              <p class="summary">Bridge, subscribers, and live observer controls with direct runtime actions.</p>
+              <div class="button-grid">
+                <button class="ghost" type="button" id="integrations-center-refresh">Refresh Integrations</button>
+                <button class="ghost" type="button" id="integrations-center-bridge">Refresh Bridge</button>
+                <button class="ghost" type="button" id="integrations-center-subs">Refresh Subscribers</button>
+                <button class="ghost" type="button" id="integrations-center-livekit">Refresh LiveKit</button>
+              </div>
+              <div class="button-grid">
+                <button class="ghost" type="button" id="integrations-center-open-antigravity">Open Antigravity</button>
+                <button class="ghost" type="button" id="integrations-center-open-chrome">Open Chrome</button>
+                <button class="ghost" type="button" id="integrations-center-open-live-viewer">Expand Live Viewer</button>
+              </div>
+              <pre id="integrations-center-summary">Integration controls ready.</pre>
+            </section>
+            <section>
+              <h2>Live Observer Snapshot</h2>
+              <p class="summary">Latest autonomous loop status and watcher summary.</p>
+              <pre id="integrations-center-watch-summary">No active watch session.</pre>
+            </section>
+          </article>
+
+          <article id="settings-panel" class="panel split" data-ide-pane data-ide-label="Settings">
+            <section>
+              <h2>Runtime + Preferences</h2>
+              <p class="summary">Quick runtime controls, provider status, and onboarding access.</p>
+              <div class="button-grid">
+                <button class="ghost" type="button" id="settings-center-provider">Refresh Provider Status</button>
+                <button class="ghost" type="button" id="settings-center-heartbeat">Refresh Heartbeat</button>
+                <button class="ghost" type="button" id="settings-center-heartbeat-run">Run Heartbeat Now</button>
+                <button class="ghost" type="button" id="settings-center-onboarding">Reopen Onboarding</button>
+              </div>
+              <pre id="settings-center-summary">Runtime controls ready.</pre>
+            </section>
+            <section>
+              <h2>Config Hints</h2>
+              <p class="summary">Provider mode, extension mode, and local env/export settings are managed from runtime controls.</p>
+              <pre id="settings-center-config">Use the left drawer Runtime Controls pane for model lanes, bridge state, and extension toggles.</pre>
+            </section>
           </article>
 
           <article id="dev-workbench-panel" class="panel panel-dev-workbench" data-ide-pane data-ide-label="Dev Workbench">
@@ -987,63 +1143,52 @@
               <pre id="x-algo-weights"></pre>
             </section>
           </article>
+
+          <article id="advanced-panel" class="panel split" data-ide-pane data-ide-label="Advanced">
+            <section>
+              <h2>Advanced Actions</h2>
+              <p class="summary">Developer workbench, approvals, and high-control automation actions.</p>
+              <div class="button-grid">
+                <button class="ghost" type="button" id="advanced-open-dev-workbench">Open Dev Workbench</button>
+                <button class="ghost" type="button" id="advanced-open-xalgo">Open X Algo Lab</button>
+                <button class="ghost" type="button" id="advanced-refresh-approvals">Refresh Approvals</button>
+                <button class="ghost" type="button" id="advanced-refresh-tasks">Refresh Tasks</button>
+              </div>
+              <pre id="advanced-center-summary">Advanced workspace ready.</pre>
+            </section>
+            <section>
+              <h2>Terminal + Execution</h2>
+              <p class="summary">Use the Dev Workbench for PTY sessions, git operations, and code approvals.</p>
+              <div class="button-grid">
+                <button class="ghost" type="button" id="advanced-open-terminal-sessions">Refresh Terminal Sessions</button>
+                <button class="ghost" type="button" id="advanced-open-integration-actions">Open Integration Actions</button>
+              </div>
+              <pre id="advanced-center-extra">Terminal and integration actions available from docked panels.</pre>
+            </section>
+          </article>
             </section>
           </section>
 
           <aside id="dashboard-utility-rail" class="utility-rail ide-inspector" aria-hidden="false">
           <div class="utility-rail-head">
-            <h2>Inspector</h2>
+            <h2>Autonomous Loop</h2>
             <button class="ghost" type="button" id="utility-rail-toggle">Collapse</button>
           </div>
           <section class="sub-panel ide-inspector-module">
-            <h3>Current</h3>
+            <h3 id="ide-current-heading">Current</h3>
             <pre id="ide-task-summary">No task data.</pre>
           </section>
           <section class="sub-panel ide-inspector-module">
-            <h3>Event Stream</h3>
+            <h3 id="ide-event-heading">Event Stream (0)</h3>
             <pre id="ide-approval-summary">No approval data.</pre>
           </section>
           <section class="sub-panel ide-inspector-module">
-            <h3>Goals</h3>
+            <h3 id="ide-goals-heading">Goals (0)</h3>
             <pre id="ide-watch-summary">No active watch session.</pre>
           </section>
           <section class="sub-panel ide-inspector-module">
-            <h3>Tasks</h3>
+            <h3 id="ide-tasks-heading">Tasks (0)</h3>
             <pre id="ide-provider-summary">Provider health unknown.</pre>
-          </section>
-          <p class="summary" id="context-mode-hint">Web fallback active: use Send Context or Cmd/Ctrl+Shift+K.</p>
-          <p class="summary" id="context-feedback-line">Context tools ready.</p>
-
-          <section class="sub-panel utility-section">
-            <h3>Context Inbox</h3>
-            <p class="summary">Capture context, edit tags, pin, and route into composer/planner/chat/mission.</p>
-            <div class="button-row">
-              <button class="ghost" type="button" id="utility-source-use-selection">Use Selection</button>
-              <button class="ghost" type="button" id="utility-source-use-latest">Use Latest</button>
-            </div>
-            <div id="context-inbox-list" class="context-inbox-list"></div>
-          </section>
-
-          <section class="sub-panel utility-section">
-            <h3>Post Builder Shortcuts</h3>
-            <p class="summary">Prefill only. No auto-posting.</p>
-            <label>Source context</label>
-            <textarea id="context-rail-source" rows="5" placeholder="Paste or capture context for transforms and tool prefills."></textarea>
-            <div class="button-grid utility-transform-grid">
-              <button class="ghost" type="button" data-context-transform="tighten">Tighten</button>
-              <button class="ghost" type="button" data-context-transform="threadify">Threadify</button>
-              <button class="ghost" type="button" data-context-transform="cta">CTA Variant</button>
-            </div>
-          </section>
-
-          <section class="sub-panel utility-section">
-            <h3>Tools + Knowledge Shortcuts</h3>
-            <div class="button-grid">
-              <button class="ghost" type="button" id="utility-prefill-planner">Prefill Planner Goal</button>
-              <button class="ghost" type="button" id="utility-prefill-mission">Prefill Mission Query</button>
-              <button class="ghost" type="button" id="utility-prefill-command">Prefill Command Studio</button>
-              <button class="ghost" type="button" id="utility-archive-knowledge">Archive to Knowledge</button>
-            </div>
           </section>
           </aside>
         </div>
@@ -1110,6 +1255,16 @@
         <input id="desktop-command-search" type="text" placeholder="Search commands..." autocomplete="off" />
         <div id="desktop-command-hint" class="desktop-command-hint">Use ↑/↓ to navigate and Enter to run.</div>
         <div id="desktop-command-list" class="desktop-command-list" role="listbox"></div>
+      </div>
+    </div>
+
+    <div id="live-viewer-modal" class="dashboard-modal-overlay hidden live-viewer-modal-overlay" aria-hidden="true">
+      <div class="dashboard-modal-card live-viewer-modal-card" role="dialog" aria-modal="true" aria-labelledby="live-viewer-title">
+        <div class="dashboard-modal-head">
+          <h3 id="live-viewer-title">Live Observer</h3>
+          <button class="ghost" type="button" id="live-viewer-close">Close</button>
+        </div>
+        <iframe id="live-viewer-iframe" class="live-viewer-iframe" title="Live Observer Expanded" src="/live.html"></iframe>
       </div>
     </div>
 

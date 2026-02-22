@@ -1,91 +1,133 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 
-const electronMainSource = readFileSync(new URL("../electron/main.cjs", import.meta.url), "utf8");
 const dashboardAppSource = readFileSync(new URL("../web/app.js", import.meta.url), "utf8");
 const dashboardHtml = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
 const webStyles = readFileSync(new URL("../web/styles.css", import.meta.url), "utf8");
 
-describe("electron desktop shell", () => {
-  it("creates a secure BrowserWindow and hosts the local dashboard", () => {
-    expect(electronMainSource).toContain("new BrowserWindow");
-    expect(electronMainSource).toContain("contextIsolation: true");
-    expect(electronMainSource).toContain("nodeIntegration: false");
-    expect(electronMainSource).toContain("mainWindow.loadURL(appUrl)");
-    expect(electronMainSource).toContain("startServer()");
-  });
-});
+const countMatches = (source: string, pattern: RegExp) => [...source.matchAll(pattern)].length;
 
-describe("dashboard ide workspace layout", () => {
-  it("boots from the ide workspace runtime path with v5 layout state", () => {
-    expect(dashboardAppSource).toContain("UI_LAYOUT_STATE_KEY");
-    expect(dashboardAppSource).toContain("ui-layout.v5");
-    expect(dashboardAppSource).toContain("state.uiLayout = readUiLayoutState()");
-    expect(dashboardAppSource).toContain("initIdeWorkspace()");
-    expect(dashboardAppSource).toContain("setIdeActivityTab");
-    expect(dashboardAppSource).toContain("setIdeCenterTab");
-    expect(dashboardAppSource).toContain("runIdeWorkspaceAction");
-    expect(dashboardAppSource).toContain("leftSidebarCollapsed: true");
-    expect(dashboardAppSource).toContain("bottomRailCollapsed: true");
-    expect(dashboardAppSource).toContain("centerSplitRatio: 0.72");
-    expect(dashboardAppSource).toContain("rightInspectorCollapsed: true");
-    expect(dashboardAppSource).not.toContain("initDashboardWorkbench();");
-    expect(dashboardAppSource).not.toContain("initBlueprintShell();");
+describe("social agent studio ui contract", () => {
+  it("uses v8 layout state + chat mode persistence with top-tab contract", () => {
+    expect(dashboardAppSource).toContain("prompt-or-die-social-suite.ui-layout.v8");
+    expect(dashboardAppSource).toContain("prompt-or-die-social-suite.ui-chat-mode.v1");
+    expect(dashboardAppSource).toContain("const UI_ACTIVITY_TABS = Object.freeze([");
+    expect(dashboardAppSource).toContain('"chat"');
+    expect(dashboardAppSource).toContain('"agent"');
+    expect(dashboardAppSource).toContain('"memory"');
+    expect(dashboardAppSource).toContain('"tools"');
+    expect(dashboardAppSource).toContain('"integrations"');
+    expect(dashboardAppSource).toContain('"workflows"');
+    expect(dashboardAppSource).toContain('"settings"');
+    expect(dashboardAppSource).toContain('"advanced"');
+    expect(dashboardAppSource).toContain("activeTopTab: \"chat\"");
+    expect(dashboardAppSource).toContain("leftDrawerCollapsed: true");
+    expect(dashboardAppSource).toContain("rightRailCollapsed: false");
+    expect(dashboardAppSource).toContain("bottomDrawerCollapsed: true");
+    expect(dashboardAppSource).toContain("chatMode: \"simple\"");
   });
 
-  it("renders the IDE shell primitives and viewer-first workspace tabs", () => {
-    expect(dashboardHtml).toContain('id="dashboard-root" class="ide-shell');
-    expect(dashboardHtml).toContain('class="ide-topbar"');
-    expect(dashboardHtml).toContain('id="ide-activity-rail"');
-    expect(dashboardHtml).toContain('class="ide-activity-rail ide-nav-row"');
-    expect(dashboardHtml).toContain('id="ide-left-dock"');
-    expect(dashboardHtml).toContain('id="ide-center-tabs"');
-    expect(dashboardHtml).toContain('id="ide-main-dock"');
-    expect(dashboardHtml).toContain('id="dashboard-utility-rail" class="utility-rail ide-inspector"');
-    expect(dashboardHtml).toContain('id="ide-bottom-rail"');
-    expect(dashboardHtml).toContain('data-ide-center-tab="live_observer"');
-    expect(dashboardHtml).toContain('data-ide-center-tab="mission_console"');
-    expect(dashboardHtml).toContain('data-ide-center-tab="tweet_composer"');
-    expect(dashboardHtml).toContain('id="cowork-live-iframe"');
+  it("maps each top tab to direct center views and tab-context drawer behavior", () => {
+    expect(dashboardAppSource).toContain('chat: "cowork-panel"');
+    expect(dashboardAppSource).toContain('agent: "ai-chat-panel"');
+    expect(dashboardAppSource).toContain('memory: "memory-panel"');
+    expect(dashboardAppSource).toContain('tools: "command-studio-panel"');
+    expect(dashboardAppSource).toContain('integrations: "integrations-panel"');
+    expect(dashboardAppSource).toContain('workflows: "planner-panel"');
+    expect(dashboardAppSource).toContain('settings: "settings-panel"');
+    expect(dashboardAppSource).toContain('advanced: "advanced-panel"');
+
+    expect(dashboardAppSource).toContain('memory: ["memory-tools-panel", "recent-runs-panel", "quick-automations-panel"]');
+    expect(dashboardAppSource).toContain('tools: ["tools-drawer-panel", "mac-watch-panel", "layout-generator-panel"]');
+    expect(dashboardAppSource).toContain('integrations: ["integrations-drawer-panel", "mac-watch-panel", "runtime-controls-panel"]');
+    expect(dashboardAppSource).toContain('workflows: ["workflows-drawer-panel", "task-board-panel", "mac-watch-panel"]');
+    expect(dashboardAppSource).toContain('advanced: ["advanced-drawer-panel", "mac-watch-panel", "approval-queue-panel"]');
+
+    expect(dashboardAppSource).toContain("if (next === \"chat\") {");
+    expect(dashboardAppSource).toContain("updated.leftDrawerCollapsed = true;");
+    expect(dashboardAppSource).toContain("updated.leftDrawerCollapsed = false;");
   });
 
-  it("ships IDE shell styling primitives and responsive viewer constraints", () => {
+  it("renders Social Agent Studio shell regions and exact top-tab order", () => {
+    expect(dashboardHtml).toContain("<title>Social Agent Studio</title>");
+    expect(dashboardHtml).toContain('class="ide-topbar-title">Social Agent Studio</strong>');
+
+    const tabSequence = [
+      'data-ide-activity="chat"',
+      'data-ide-activity="agent"',
+      'data-ide-activity="memory"',
+      'data-ide-activity="tools"',
+      'data-ide-activity="integrations"',
+      'data-ide-activity="workflows"',
+      'data-ide-activity="settings"',
+      'data-ide-activity="advanced"',
+    ];
+    let prevIndex = -1;
+    for (const marker of tabSequence) {
+      const nextIndex = dashboardHtml.indexOf(marker);
+      expect(nextIndex).toBeGreaterThan(prevIndex);
+      prevIndex = nextIndex;
+    }
+
+    expect(countMatches(dashboardHtml, /id="ide-left-dock"/g)).toBe(1);
+    expect(countMatches(dashboardHtml, /id="ide-main-dock"/g)).toBe(1);
+    expect(countMatches(dashboardHtml, /id="dashboard-utility-rail"/g)).toBe(1);
+    expect(countMatches(dashboardHtml, /id="ide-bottom-rail"/g)).toBe(1);
+
+    expect(dashboardHtml).toContain('id="ide-current-heading"');
+    expect(dashboardHtml).toContain('id="ide-event-heading"');
+    expect(dashboardHtml).toContain('id="ide-goals-heading"');
+    expect(dashboardHtml).toContain('id="ide-tasks-heading"');
+    expect(dashboardHtml).toContain('id="watch-expand-live"');
+    expect(dashboardHtml).toContain('id="live-viewer-modal"');
+
+    expect(dashboardHtml).toContain('id="integrations-panel"');
+    expect(dashboardHtml).toContain('id="settings-panel"');
+    expect(dashboardHtml).toContain('id="advanced-panel"');
+    expect(dashboardHtml).toContain('id="memory-tools-panel"');
+    expect(dashboardHtml).toContain('id="tools-drawer-panel"');
+    expect(dashboardHtml).toContain('id="integrations-drawer-panel"');
+    expect(dashboardHtml).toContain('id="workflows-drawer-panel"');
+    expect(dashboardHtml).toContain('id="advanced-drawer-panel"');
+    expect(dashboardHtml).not.toContain("data-ide-center-tab=");
+  });
+
+  it("ships canonical Social Agent Studio styling without legacy parity override stack", () => {
     expect(webStyles).toContain("#dashboard-root.ide-shell {");
-    expect(webStyles).toContain(".ide-topbar");
-    expect(webStyles).toContain("#ide-activity-rail");
-    expect(webStyles).toContain("#ide-left-dock");
-    expect(webStyles).toContain(".ide-editor-surface");
-    expect(webStyles).toContain("#dashboard-utility-rail");
-    expect(webStyles).toContain("#ide-bottom-rail");
-    expect(webStyles).toContain("min-width: 900px");
-    expect(webStyles).toContain("min-height: 600px");
+    expect(webStyles).toContain("grid-template-rows: 50px 54px minmax(0, 1fr) auto;");
+    expect(webStyles).toContain("#dashboard-root .ide-workspace {");
+    expect(webStyles).toContain("grid-template-columns: 300px minmax(0, 1fr) 330px;");
+    expect(webStyles).toContain("#dashboard-root #ide-center-tabs {");
+    expect(webStyles).toContain("display: none !important;");
+    expect(webStyles).toContain("#dashboard-root #ide-main-tabs {");
+    expect(webStyles).toContain("#dashboard-root .ide-view-header {");
+    expect(webStyles).toContain("#dashboard-root .arg-row {");
+    expect(webStyles).toContain("#dashboard-root .integration-badge {");
+    expect(webStyles).toContain("#dashboard-root .context-inbox-actions,");
+    expect(webStyles).toContain("#dashboard-root table {");
+    expect(webStyles).toContain(".dashboard-panel-grid {");
+    expect(webStyles).toContain("#dashboard-root.ide-left-collapsed .ide-workspace {");
+    expect(webStyles).toContain("#dashboard-root.ide-right-collapsed .ide-workspace {");
+    expect(webStyles).toContain("#dashboard-root.ide-bottom-collapsed #ide-bottom-rail {");
     expect(webStyles).toContain("@media (max-width: 1280px)");
+    expect(webStyles).not.toContain("Milady chat-shell parity override");
   });
 
-  it("applies single-shell milady-like ide grid and cowork viewer priority", () => {
-    expect(webStyles).toContain("body.dashboard-visible");
-    expect(webStyles).toContain("grid-template-columns: 56px minmax(250px, 300px) minmax(0, 1fr) minmax(280px, 320px)");
-    expect(webStyles).toContain("#dashboard-root .cowork-grid {");
-    expect(webStyles).toContain("grid-template-columns: minmax(900px, 72%) minmax(320px, 28%)");
-    expect(webStyles).toContain("#dashboard-root.ide-cowork-focus .cowork-grid");
-    expect(webStyles).toContain("#dashboard-root.ide-left-collapsed .ide-workspace");
-    expect(webStyles).toContain("#dashboard-root.ide-right-collapsed .ide-workspace");
-    expect(webStyles).toContain("#dashboard-root.ide-bottom-collapsed");
-  });
-
-  it("keeps social + agent feature wiring ids in the replacement shell", () => {
+  it("keeps feature wiring IDs and readable rail render contract", () => {
     expect(dashboardHtml).toContain('id="login-form"');
     expect(dashboardHtml).toContain('id="tweet-form"');
     expect(dashboardHtml).toContain('id="x-algo-form"');
     expect(dashboardHtml).toContain('id="ai-form"');
-    expect(dashboardHtml).toContain('id="ai-image-form"');
-    expect(dashboardHtml).toContain('id="ai-video-form"');
     expect(dashboardHtml).toContain('id="plan-form"');
     expect(dashboardHtml).toContain('id="workflow-run"');
-    expect(dashboardHtml).toContain('id="cowork-mission-social"');
     expect(dashboardHtml).toContain('id="context-inbox-list"');
     expect(dashboardHtml).toContain('id="approval-action-modal"');
-    expect(dashboardHtml).toContain('id="approval-modal-auto-toggle"');
     expect(dashboardHtml).toContain('id="desktop-command-palette"');
+
+    expect(dashboardAppSource).toContain('eventHeading.textContent = `Event Stream (${eventCount})`;');
+    expect(dashboardAppSource).toContain('goalsHeading.textContent = `Goals (${goalsCount})`;');
+    expect(dashboardAppSource).toContain('tasksHeading.textContent = `Tasks (${totalTasks})`;');
+    expect(dashboardAppSource).toContain('setText(\n    "ide-task-summary",');
+    expect(dashboardAppSource).toContain('setText(\n    "ide-provider-summary",');
   });
 });

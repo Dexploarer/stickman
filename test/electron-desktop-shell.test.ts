@@ -15,8 +15,8 @@ describe("electron desktop shell integrations", () => {
     expect(mainSource).toContain("Notification");
     expect(mainSource).toContain("/api/live/events");
     expect(mainSource).toContain("titleBarOverlayMode");
-    expect(mainSource).toContain("ipcMain.handle(\"pod:desktop:commands:get\"");
-    expect(mainSource).toContain("ipcMain.handle(\"pod:desktop:preferences:set\"");
+    expect(mainSource).toContain('ipcMain.handle("pod:desktop:commands:get"');
+    expect(mainSource).toContain('ipcMain.handle("pod:desktop:preferences:set"');
     expect(mainSource).toContain("pod:desktop-command");
     expect(mainSource).toContain("pod:desktop-live-event");
   });
@@ -31,34 +31,36 @@ describe("electron desktop shell integrations", () => {
     expect(preloadSource).toContain("onDesktopLiveEvent");
     expect(preloadSource).toContain("onDesktopCapabilities");
     expect(preloadSource).toContain("onDesktopPreferences");
-    expect(preloadSource).not.toContain("exposeInMainWorld(\"ipcRenderer\"");
+    expect(preloadSource).not.toContain('exposeInMainWorld("ipcRenderer"');
   });
 
-  it("adds command palette parity and titlebar-aware UI hooks in renderer", () => {
+  it("keeps desktop command palette and Social Agent Studio shell wiring in renderer", () => {
     expect(appSource).toContain("DESKTOP_COMMAND_ACTION_MAP");
     expect(appSource).toContain("openDesktopCommandPalette");
     expect(appSource).toContain("executeDesktopCommand");
     expect(appSource).toContain("syncDesktopWindowChrome");
     expect(appSource).toContain("initIdeWorkspace()");
     expect(appSource).toContain("setIdeActivityTab");
-    expect(appSource).toContain("setIdeCenterTab");
     expect(appSource).toContain("onDesktopCommand");
     expect(appSource).toContain("onDesktopLiveEvent");
     expect(appSource).toContain("isApprovalQueuedLiveEvent");
 
+    expect(htmlSource).toContain('<title>Social Agent Studio</title>');
     expect(htmlSource).toContain('id="desktop-command-palette"');
     expect(htmlSource).toContain('id="desktop-command-search"');
     expect(htmlSource).toContain('id="desktop-drag-region"');
     expect(htmlSource).toContain('id="approval-action-modal"');
     expect(htmlSource).toContain('id="ide-activity-rail"');
-    expect(htmlSource).toContain('id="ide-bottom-rail"');
+    expect(htmlSource).toContain('data-ide-activity="advanced"');
+    expect(htmlSource).toContain('id="integrations-center-open-live-viewer"');
+    expect(htmlSource).toContain('id="live-viewer-modal"');
 
     expect(styleSource).toContain(".desktop-drag-region {");
     expect(styleSource).toContain(".desktop-command-item {");
     expect(styleSource).toContain(".approval-action-modal-card {");
     expect(styleSource).toContain(".pplx-notification-feed {");
     expect(styleSource).toContain("#dashboard-root.ide-shell {");
-    expect(styleSource).toContain(".ide-topbar");
-    expect(styleSource).toContain(".ide-activity-rail");
+    expect(styleSource).toContain("#dashboard-root #ide-activity-rail {");
+    expect(styleSource).toContain("#dashboard-root .ide-topbar {");
   });
 });

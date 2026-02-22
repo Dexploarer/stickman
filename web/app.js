@@ -14,10 +14,11 @@ import {
 const HISTORY_KEY = "prompt-or-die-social-suite.history.v1";
 const COWORK_CHAT_KEY = "prompt-or-die-social-suite.cowork.chat.v1";
 const COWORK_VIEW_KEY = "prompt-or-die-social-suite.cowork.view.v3";
+const UI_CHAT_MODE_KEY = "prompt-or-die-social-suite.ui-chat-mode.v1";
 const MAX_HISTORY = 50;
 const BLUEPRINT_WORKBENCH_MODE_KEY = "prompt-or-die-social-suite.blueprint.workbench-mode.v3";
 const IDE_DOCK_STATE_KEY = "prompt-or-die-social-suite.ide-dock.state.v3";
-const UI_LAYOUT_STATE_KEY = "prompt-or-die-social-suite.ui-layout.v6";
+const UI_LAYOUT_STATE_KEY = "prompt-or-die-social-suite.ui-layout.v8";
 const DASHBOARD_LAYOUT_KEY = "prompt-or-die-social-suite.dashboard.layout.v1";
 const DASHBOARD_VIEW_KEY = "prompt-or-die-social-suite.dashboard.view.v1";
 const DASHBOARD_CUSTOM_PANELS_KEY = "prompt-or-die-social-suite.dashboard.custom-panels.v1";
@@ -49,21 +50,35 @@ const IDE_DOCK_CONFIG = Object.freeze({
   },
 });
 const UI_ACTIVITY_TABS = Object.freeze([
-  "cowork",
-  "compose",
-  "planner",
+  "chat",
+  "agent",
+  "memory",
+  "tools",
   "integrations",
-  "approvals",
-  "skills",
+  "workflows",
   "settings",
+  "advanced",
 ]);
+const LEGACY_ACTIVITY_ALIAS = Object.freeze({
+  cowork: "chat",
+  compose: "agent",
+  planner: "workflows",
+  approvals: "tools",
+  skills: "memory",
+});
 const UI_CENTER_TABS = Object.freeze([
   "live_observer",
   "mission_console",
   "tweet_composer",
 ]);
 const UI_LAYOUT_DEFAULTS = Object.freeze({
-  activeActivityTab: "cowork",
+  activeTopTab: "chat",
+  activeCenterView: "chat",
+  leftDrawerCollapsed: true,
+  rightRailCollapsed: false,
+  bottomDrawerCollapsed: true,
+  chatMode: "simple",
+  activeActivityTab: "chat",
   activeCenterTab: "live_observer",
   leftSidebarCollapsed: true,
   rightInspectorCollapsed: false,
@@ -167,6 +182,7 @@ const state = {
 };
 
 let runBlueprintCapabilityAction = async () => false;
+let refreshLoopPaused = false;
 
 const DESKTOP_LIVE_EVENT_LIMIT = 40;
 const DESKTOP_COMMAND_LABEL_FALLBACK = "Unknown Command";
@@ -1805,6 +1821,7 @@ const syncUtilityRailState = () => {
   const collapsed = Boolean(state.utilityRail.collapsed);
   state.uiLayout = {
     ...normalizeUiLayoutState(state.uiLayout),
+    rightRailCollapsed: collapsed,
     rightInspectorCollapsed: collapsed,
   };
   const root = $("dashboard-root");
@@ -1817,7 +1834,7 @@ const syncUtilityRailState = () => {
   rail.setAttribute("aria-hidden", collapsed ? "true" : "false");
   const toggle = $("utility-rail-toggle");
   if (toggle) {
-    toggle.textContent = collapsed ? "Open Inspector" : "Collapse";
+    toggle.textContent = collapsed ? "Open Loop" : "Collapse";
   }
 };
 
@@ -3018,29 +3035,73 @@ const focusDashboardField = (fieldId, { scroll = true } = {}) => {
   }
 };
 
+const normalizeTopTab = (raw) => {
+  const value = String(raw || "").trim();
+  if (UI_ACTIVITY_TABS.includes(value)) {
+    return value;
+  }
+  if (LEGACY_ACTIVITY_ALIAS[value]) {
+    return LEGACY_ACTIVITY_ALIAS[value];
+  }
+  return UI_LAYOUT_DEFAULTS.activeTopTab;
+};
+
+const topTabToCenterView = (topTab) => {
+  const tab = normalizeTopTab(topTab);
+  if (tab === "chat") return "chat";
+  if (tab === "agent") return "agent";
+  if (tab === "memory") return "memory";
+  if (tab === "tools") return "tools";
+  if (tab === "integrations") return "integrations";
+  if (tab === "workflows") return "workflows";
+  if (tab === "settings") return "settings";
+  return "advanced";
+};
+
+const centerViewToLegacyCenterTab = (view) => {
+  if (view === "workflows") return "mission_console";
+  if (view === "chat") return "live_observer";
+  return "tweet_composer";
+};
+
 const normalizeUiLayoutState = (candidate) => {
-  const activity = UI_ACTIVITY_TABS.includes(String(candidate?.activeActivityTab || "").trim())
-    ? String(candidate.activeActivityTab).trim()
-    : UI_LAYOUT_DEFAULTS.activeActivityTab;
-  const center = UI_CENTER_TABS.includes(String(candidate?.activeCenterTab || "").trim())
+  const activeTopTab = normalizeTopTab(candidate?.activeTopTab || candidate?.activeActivityTab);
+  const activeCenterView = String(candidate?.activeCenterView || "").trim() || topTabToCenterView(activeTopTab);
+  const legacyCenter = UI_CENTER_TABS.includes(String(candidate?.activeCenterTab || "").trim())
     ? String(candidate.activeCenterTab).trim()
-    : UI_LAYOUT_DEFAULTS.activeCenterTab;
+    : centerViewToLegacyCenterTab(activeCenterView);
   const ratioRaw = Number(candidate?.centerSplitRatio);
   const centerSplitRatio = Number.isFinite(ratioRaw)
     ? Math.max(0.58, Math.min(0.8, ratioRaw))
     : UI_LAYOUT_DEFAULTS.centerSplitRatio;
-  return {
-    activeActivityTab: activity,
-    activeCenterTab: center,
-    leftSidebarCollapsed: typeof candidate?.leftSidebarCollapsed === "boolean"
+  const leftDrawerCollapsed = typeof candidate?.leftDrawerCollapsed === "boolean"
+    ? candidate.leftDrawerCollapsed
+    : typeof candidate?.leftSidebarCollapsed === "boolean"
       ? candidate.leftSidebarCollapsed
-      : UI_LAYOUT_DEFAULTS.leftSidebarCollapsed,
-    rightInspectorCollapsed: typeof candidate?.rightInspectorCollapsed === "boolean"
+      : UI_LAYOUT_DEFAULTS.leftDrawerCollapsed;
+  const rightRailCollapsed = typeof candidate?.rightRailCollapsed === "boolean"
+    ? candidate.rightRailCollapsed
+    : typeof candidate?.rightInspectorCollapsed === "boolean"
       ? candidate.rightInspectorCollapsed
-      : UI_LAYOUT_DEFAULTS.rightInspectorCollapsed,
-    bottomRailCollapsed: typeof candidate?.bottomRailCollapsed === "boolean"
+      : UI_LAYOUT_DEFAULTS.rightRailCollapsed;
+  const bottomDrawerCollapsed = typeof candidate?.bottomDrawerCollapsed === "boolean"
+    ? candidate.bottomDrawerCollapsed
+    : typeof candidate?.bottomRailCollapsed === "boolean"
       ? candidate.bottomRailCollapsed
-      : UI_LAYOUT_DEFAULTS.bottomRailCollapsed,
+      : UI_LAYOUT_DEFAULTS.bottomDrawerCollapsed;
+  const chatMode = String(candidate?.chatMode || "").trim() === "power" ? "power" : "simple";
+  return {
+    activeTopTab,
+    activeCenterView,
+    leftDrawerCollapsed,
+    rightRailCollapsed,
+    bottomDrawerCollapsed,
+    chatMode,
+    activeActivityTab: activeTopTab,
+    activeCenterTab: legacyCenter,
+    leftSidebarCollapsed: leftDrawerCollapsed,
+    rightInspectorCollapsed: rightRailCollapsed,
+    bottomRailCollapsed: bottomDrawerCollapsed,
     centerSplitRatio,
   };
 };
@@ -3057,6 +3118,16 @@ const writeUiLayoutState = () => {
   writePersistedJSON(window.localStorage, UI_LAYOUT_STATE_KEY, normalizeUiLayoutState(state.uiLayout));
 };
 
+const readChatModeState = () => {
+  const raw = String(window.localStorage.getItem(UI_CHAT_MODE_KEY) || "").trim();
+  return raw === "power" ? "power" : "simple";
+};
+
+const writeChatModeState = (mode) => {
+  const normalized = mode === "power" ? "power" : "simple";
+  window.localStorage.setItem(UI_CHAT_MODE_KEY, normalized);
+};
+
 const syncIdeTopbarStatus = () => {
   const healthChip = $("health-chip");
   const onboardingChip = $("onboarding-chip");
@@ -3071,13 +3142,14 @@ const syncIdeTopbarStatus = () => {
 };
 
 const ACTIVITY_LEFT_PANES = Object.freeze({
-  cowork: ["task-board-panel", "mac-watch-panel", "recent-runs-panel", "approval-queue-panel"],
-  compose: ["quick-automations-panel", "recent-runs-panel", "runtime-controls-panel"],
-  planner: ["layout-generator-panel", "runtime-controls-panel", "recent-runs-panel"],
-  integrations: ["runtime-controls-panel", "mac-watch-panel"],
-  approvals: ["approval-queue-panel", "task-board-panel", "recent-runs-panel"],
-  skills: ["skill-center-panel", "quick-automations-panel", "recent-runs-panel"],
-  settings: ["runtime-controls-panel", "layout-generator-panel", "mac-watch-panel"],
+  chat: ["task-board-panel", "recent-runs-panel", "approval-queue-panel"],
+  agent: ["skill-center-panel", "quick-automations-panel", "runtime-controls-panel"],
+  memory: ["memory-tools-panel", "recent-runs-panel", "quick-automations-panel"],
+  tools: ["tools-drawer-panel", "mac-watch-panel", "layout-generator-panel"],
+  integrations: ["integrations-drawer-panel", "mac-watch-panel", "runtime-controls-panel"],
+  workflows: ["workflows-drawer-panel", "task-board-panel", "mac-watch-panel"],
+  settings: ["runtime-controls-panel", "quick-automations-panel", "layout-generator-panel"],
+  advanced: ["advanced-drawer-panel", "mac-watch-panel", "approval-queue-panel"],
 });
 
 const CENTER_TAB_TO_PANE = Object.freeze({
@@ -3087,20 +3159,53 @@ const CENTER_TAB_TO_PANE = Object.freeze({
 });
 
 const ACTIVITY_MAIN_PANE = Object.freeze({
-  cowork: "",
-  compose: "compose-panel",
-  planner: "planner-panel",
-  integrations: "ai-chat-panel",
-  approvals: "command-studio-panel",
-  skills: "media-copilot-panel",
-  settings: "x-algo-panel",
+  chat: "cowork-panel",
+  agent: "ai-chat-panel",
+  memory: "memory-panel",
+  tools: "command-studio-panel",
+  integrations: "integrations-panel",
+  workflows: "planner-panel",
+  settings: "settings-panel",
+  advanced: "advanced-panel",
+});
+
+const TOP_TAB_META = Object.freeze({
+  chat: {
+    title: "Chat",
+    subtitle: "Co-work chat with direct command dispatch and focused interaction.",
+  },
+  agent: {
+    title: "Agent",
+    subtitle: "AI chat and skill execution with fast handoff into compose/media.",
+  },
+  memory: {
+    title: "Memory",
+    subtitle: "Context inbox and knowledge capture for reusable social intelligence.",
+  },
+  tools: {
+    title: "Tools",
+    subtitle: "Command studio endpoint execution with quick preset workflows.",
+  },
+  integrations: {
+    title: "Integrations",
+    subtitle: "Bridge, subscribers, and LiveKit controls for connected operations.",
+  },
+  workflows: {
+    title: "Workflows",
+    subtitle: "Planner and workflow runner for mission automation chains.",
+  },
+  settings: {
+    title: "Settings",
+    subtitle: "Runtime preferences, provider state, and onboarding controls.",
+  },
+  advanced: {
+    title: "Advanced",
+    subtitle: "X-algo, dev workbench, approvals, and advanced operational actions.",
+  },
 });
 
 const resolveMainPaneForUiLayout = () => {
-  const activity = state.uiLayout.activeActivityTab;
-  if (activity === "cowork") {
-    return CENTER_TAB_TO_PANE[state.uiLayout.activeCenterTab] || "cowork-panel";
-  }
+  const activity = state.uiLayout.activeTopTab;
   return ACTIVITY_MAIN_PANE[activity] || "cowork-panel";
 };
 
@@ -3111,27 +3216,62 @@ const renderIdeInspectorSummaries = () => {
   const completed = Number(summary.tasks?.completed || 0);
   const approvals = Number(summary.approvals?.total || 0);
   const watch = Number(summary.watch?.active || 0);
-  setText("ide-task-summary", {
-    running,
-    queued,
-    completed,
-    total: Array.isArray(state.tasks) ? state.tasks.length : 0,
-  });
-  setText("ide-approval-summary", {
-    pending: approvals,
-    queue: Array.isArray(state.approvals) ? state.approvals.length : 0,
-  });
-  setText("ide-watch-summary", {
-    active: watch,
-    session: resolveActiveWatchSession() || "none",
-  });
-  setText("ide-provider-summary", {
-    route: state.providerStatus?.activeRoute || state.providerStatus?.mode || "unknown",
-    provider: state.providerStatus?.providerMode || "unknown",
-    socialReady: Boolean(state.integrations?.readiness?.socialAgentReady),
-    watchReady: Boolean(state.integrations?.readiness?.watchReady),
-    livekitConfigured: Boolean(state.livekitStatus?.configured || state.integrations?.livekit?.configured),
-  });
+  const logs = Array.isArray(state.taskLogs) ? state.taskLogs : [];
+  const eventCount = logs.length;
+  const latestEvent = eventCount ? logs[0] : null;
+  const latestType = latestEvent ? String(latestEvent.type || "event") : "none";
+  const goalsCount = Array.isArray(state.coworkMissions) ? state.coworkMissions.length : 0;
+  const liveSession = resolveActiveWatchSession() || "none";
+  const route = state.providerStatus?.activeRoute || state.providerStatus?.mode || "unknown";
+  const statusLine = watch > 0 ? "Live stream connected" : "No active stream";
+  const totalTasks = Array.isArray(state.tasks) ? state.tasks.length : 0;
+
+  const eventHeading = $("ide-event-heading");
+  const goalsHeading = $("ide-goals-heading");
+  const tasksHeading = $("ide-tasks-heading");
+  if (eventHeading instanceof HTMLElement) {
+    eventHeading.textContent = `Event Stream (${eventCount})`;
+  }
+  if (goalsHeading instanceof HTMLElement) {
+    goalsHeading.textContent = `Goals (${goalsCount})`;
+  }
+  if (tasksHeading instanceof HTMLElement) {
+    tasksHeading.textContent = `Tasks (${totalTasks})`;
+  }
+
+  setText(
+    "ide-task-summary",
+    `Live stream: ${statusLine}\nCurrent session: ${liveSession}\nRoute: ${route}`,
+  );
+  setText(
+    "ide-approval-summary",
+    `Events: ${eventCount}\nLatest: ${latestType}\nApprovals pending: ${approvals}\nQueue size: ${Array.isArray(state.approvals) ? state.approvals.length : 0}`,
+  );
+  setText(
+    "ide-watch-summary",
+    `Goals tracked: ${goalsCount}\nSession: ${liveSession}\nWatch active: ${watch}`,
+  );
+  setText(
+    "ide-provider-summary",
+    `Running: ${running}\nQueued: ${queued}\nCompleted: ${completed}\nTotal tasks: ${totalTasks}`,
+  );
+
+  setText(
+    "integrations-center-summary",
+    `Bridge route: ${route}\nApprovals pending: ${approvals}\nEvent stream size: ${eventCount}`,
+  );
+  setText(
+    "integrations-center-watch-summary",
+    `Live stream: ${statusLine}\nSession: ${liveSession}\nWatch active: ${watch}`,
+  );
+  setText(
+    "settings-center-summary",
+    `Provider route: ${route}\nApprovals pending: ${approvals}\nTasks running: ${running}`,
+  );
+  setText(
+    "advanced-center-summary",
+    `Running: ${running}\nQueued: ${queued}\nApprovals pending: ${approvals}\nLive watch: ${watch}`,
+  );
 };
 
 const appendIdeError = (payload) => {
@@ -3172,7 +3312,7 @@ const applyUiLayoutState = ({ persist = false } = {}) => {
   }
   state.uiLayout = normalizeUiLayoutState(state.uiLayout);
   const current = state.uiLayout;
-  const leftAllowed = new Set(ACTIVITY_LEFT_PANES[current.activeActivityTab] || ACTIVITY_LEFT_PANES.cowork);
+  const leftAllowed = new Set(ACTIVITY_LEFT_PANES[current.activeTopTab] || ACTIVITY_LEFT_PANES.chat);
 
   const leftDock = $("ide-left-dock");
   if (leftDock instanceof HTMLElement) {
@@ -3197,25 +3337,25 @@ const applyUiLayoutState = ({ persist = false } = {}) => {
   refreshIdeDockLayout();
 
   root.style.setProperty("--ide-center-ratio", `${Math.round(current.centerSplitRatio * 100)}%`);
-  root.classList.toggle("ide-left-collapsed", current.leftSidebarCollapsed);
-  root.classList.toggle("ide-right-collapsed", current.rightInspectorCollapsed);
-  root.classList.toggle("ide-bottom-collapsed", current.bottomRailCollapsed);
-  root.classList.toggle("ide-center-live", current.activeCenterTab === "live_observer");
-  root.classList.toggle("ide-center-mission", current.activeCenterTab === "mission_console");
-  root.classList.toggle("ide-center-compose", current.activeCenterTab === "tweet_composer");
+  root.classList.toggle("ide-left-collapsed", current.leftDrawerCollapsed);
+  root.classList.toggle("ide-right-collapsed", current.rightRailCollapsed);
+  root.classList.toggle("ide-bottom-collapsed", current.bottomDrawerCollapsed);
+  root.classList.toggle("ide-center-live", current.activeCenterView === "chat");
+  root.classList.toggle("ide-center-mission", current.activeCenterView === "workflows");
+  root.classList.toggle("ide-center-compose", current.activeCenterView === "agent");
   state.utilityRail = {
     ...state.utilityRail,
-    collapsed: current.rightInspectorCollapsed,
+    collapsed: current.rightRailCollapsed,
   };
   const inspectorRail = $("dashboard-utility-rail");
   if (inspectorRail instanceof HTMLElement) {
     inspectorRail.classList.remove("hidden");
-    inspectorRail.classList.toggle("collapsed", current.rightInspectorCollapsed);
-    inspectorRail.setAttribute("aria-hidden", current.rightInspectorCollapsed ? "true" : "false");
+    inspectorRail.classList.toggle("collapsed", current.rightRailCollapsed);
+    inspectorRail.setAttribute("aria-hidden", current.rightRailCollapsed ? "true" : "false");
   }
   const bottomRail = $("ide-bottom-rail");
   if (bottomRail instanceof HTMLElement) {
-    bottomRail.setAttribute("aria-hidden", current.bottomRailCollapsed ? "true" : "false");
+    bottomRail.setAttribute("aria-hidden", current.bottomDrawerCollapsed ? "true" : "false");
   }
 
   const activityButtons = [...document.querySelectorAll("[data-ide-activity]")];
@@ -3223,9 +3363,19 @@ const applyUiLayoutState = ({ persist = false } = {}) => {
     if (!(button instanceof HTMLElement)) {
       return;
     }
-    button.classList.toggle("active", button.dataset.ideActivity === current.activeActivityTab);
-    button.setAttribute("aria-selected", button.dataset.ideActivity === current.activeActivityTab ? "true" : "false");
+    button.classList.toggle("active", button.dataset.ideActivity === current.activeTopTab);
+    button.setAttribute("aria-selected", button.dataset.ideActivity === current.activeTopTab ? "true" : "false");
   });
+
+  const viewMeta = TOP_TAB_META[current.activeTopTab] || TOP_TAB_META.chat;
+  const viewTitle = $("ide-view-title");
+  const viewSubtitle = $("ide-view-subtitle");
+  if (viewTitle instanceof HTMLElement) {
+    viewTitle.textContent = viewMeta.title;
+  }
+  if (viewSubtitle instanceof HTMLElement) {
+    viewSubtitle.textContent = viewMeta.subtitle;
+  }
 
   const centerButtons = [...document.querySelectorAll("[data-ide-center-tab]")];
   centerButtons.forEach((button) => {
@@ -3240,13 +3390,13 @@ const applyUiLayoutState = ({ persist = false } = {}) => {
   const rightToggle = $("ide-toggle-right");
   const bottomToggle = $("ide-toggle-bottom");
   if (leftToggle instanceof HTMLButtonElement) {
-    leftToggle.textContent = current.leftSidebarCollapsed ? "Sidebar" : "Hide Sidebar";
+    leftToggle.textContent = current.leftDrawerCollapsed ? "Tools" : "Hide Tools";
   }
   if (rightToggle instanceof HTMLButtonElement) {
-    rightToggle.textContent = current.rightInspectorCollapsed ? "Inspector" : "Hide Inspector";
+    rightToggle.textContent = current.rightRailCollapsed ? "Loop" : "Hide Loop";
   }
   if (bottomToggle instanceof HTMLButtonElement) {
-    bottomToggle.textContent = current.bottomRailCollapsed ? "Output" : "Hide Output";
+    bottomToggle.textContent = current.bottomDrawerCollapsed ? "Output" : "Hide Output";
   }
 
   if (persist) {
@@ -3256,32 +3406,27 @@ const applyUiLayoutState = ({ persist = false } = {}) => {
 };
 
 const setIdeActivityTab = (activityTab, { persist = true } = {}) => {
-  const next = String(activityTab || "").trim();
-  if (!UI_ACTIVITY_TABS.includes(next)) {
-    return;
-  }
+  const next = normalizeTopTab(activityTab);
   const current = normalizeUiLayoutState(state.uiLayout);
+  const nextCenter = topTabToCenterView(next);
   const updated = {
     ...current,
+    activeTopTab: next,
+    activeCenterView: nextCenter,
     activeActivityTab: next,
+    activeCenterTab: centerViewToLegacyCenterTab(nextCenter),
   };
-  if (next === "compose") {
-    updated.activeCenterTab = "tweet_composer";
-  } else if (next === "planner") {
-    updated.activeCenterTab = "mission_console";
-  } else if (next === "cowork" && !UI_CENTER_TABS.includes(updated.activeCenterTab)) {
-    updated.activeCenterTab = "live_observer";
-  }
-  if (next === "cowork") {
-    updated.leftSidebarCollapsed = true;
-    updated.bottomRailCollapsed = true;
-  } else if (next === "compose" || next === "planner") {
-    updated.leftSidebarCollapsed = true;
+  if (next === "chat") {
+    updated.leftDrawerCollapsed = true;
+    updated.bottomDrawerCollapsed = true;
   } else {
-    updated.leftSidebarCollapsed = false;
-    updated.bottomRailCollapsed = true;
+    updated.leftDrawerCollapsed = false;
+    updated.bottomDrawerCollapsed = true;
   }
+  updated.leftSidebarCollapsed = updated.leftDrawerCollapsed;
+  updated.rightRailCollapsed = false;
   updated.rightInspectorCollapsed = false;
+  updated.bottomRailCollapsed = updated.bottomDrawerCollapsed;
   state.uiLayout = updated;
   applyUiLayoutState({ persist });
 };
@@ -3291,10 +3436,15 @@ const setIdeCenterTab = (centerTab, { persist = true } = {}) => {
   if (!UI_CENTER_TABS.includes(next)) {
     return;
   }
+  const view = next === "mission_console" ? "workflows" : next === "tweet_composer" ? "agent" : "chat";
   state.uiLayout = {
     ...normalizeUiLayoutState(state.uiLayout),
-    activeActivityTab: "cowork",
+    activeTopTab: view,
+    activeCenterView: view,
+    activeActivityTab: view,
     activeCenterTab: next,
+    leftDrawerCollapsed: view === "chat",
+    leftSidebarCollapsed: view === "chat",
   };
   applyUiLayoutState({ persist });
 };
@@ -3367,14 +3517,14 @@ const runIdeWorkspaceAction = async (actionId) => {
   }
   if (action === "open-antigravity") {
     const result = await runCoworkQuickAction("open_antigravity");
-    setIdeActivityTab("cowork", { persist: true });
+    setIdeActivityTab("chat", { persist: true });
     setIdeCenterTab("live_observer", { persist: true });
     setIdeActionFeedback(`Antigravity quick action queued (${result?.task?.id || "task"}).`, "success");
     return;
   }
   if (action === "open-chrome") {
     const result = await runCoworkQuickAction("open_chrome");
-    setIdeActivityTab("cowork", { persist: true });
+    setIdeActivityTab("chat", { persist: true });
     setIdeCenterTab("live_observer", { persist: true });
     setIdeActionFeedback(`Chrome quick action queued (${result?.task?.id || "task"}).`, "success");
     return;
@@ -3386,7 +3536,7 @@ const runIdeWorkspaceAction = async (actionId) => {
     return;
   }
   if (action === "run-plan") {
-    setIdeActivityTab("planner", { persist: true });
+    setIdeActivityTab("workflows", { persist: true });
     const seed = seedIdePrompt();
     if (seed && !String($("plan-goal")?.value || "").trim()) {
       setTextLikeField("plan-goal", seed);
@@ -3396,13 +3546,13 @@ const runIdeWorkspaceAction = async (actionId) => {
     return;
   }
   if (action === "run-workflow") {
-    setIdeActivityTab("planner", { persist: true });
+    setIdeActivityTab("workflows", { persist: true });
     $("workflow-run")?.click();
     setIdeActionFeedback("Workflow run requested.", "neutral");
     return;
   }
   if (action === "run-ai-chat") {
-    setIdeActivityTab("skills", { persist: true });
+    setIdeActivityTab("agent", { persist: true });
     const seed = seedIdePrompt();
     if (seed && !String($("ai-prompt")?.value || "").trim()) {
       setTextLikeField("ai-prompt", seed);
@@ -3412,7 +3562,7 @@ const runIdeWorkspaceAction = async (actionId) => {
     return;
   }
   if (action === "run-ai-image") {
-    setIdeActivityTab("skills", { persist: true });
+    setIdeActivityTab("agent", { persist: true });
     setIdeDockPane("main", "media-copilot-panel", { persist: true });
     const seed = seedIdePrompt();
     if (seed && !String($("ai-image-prompt")?.value || "").trim()) {
@@ -3423,7 +3573,7 @@ const runIdeWorkspaceAction = async (actionId) => {
     return;
   }
   if (action === "run-x-algo") {
-    setIdeActivityTab("settings", { persist: true });
+    setIdeActivityTab("advanced", { persist: true });
     setIdeDockPane("main", "x-algo-panel", { persist: true });
     const seed = seedIdePrompt();
     if (seed && !String($("x-algo-draft")?.value || "").trim()) {
@@ -3434,13 +3584,15 @@ const runIdeWorkspaceAction = async (actionId) => {
     return;
   }
   if (action === "tweet-generate") {
-    setIdeActivityTab("compose", { persist: true });
+    setIdeActivityTab("agent", { persist: true });
+    setIdeDockPane("main", "compose-panel", { persist: true });
     $("tweet-generate")?.click();
     setIdeActionFeedback("Tweet draft generation requested.", "neutral");
     return;
   }
   if (action === "tweet-post") {
-    setIdeActivityTab("compose", { persist: true });
+    setIdeActivityTab("agent", { persist: true });
+    setIdeDockPane("main", "compose-panel", { persist: true });
     const seed = seedIdePrompt();
     if (seed && !String($("tweet-text")?.value || "").trim()) {
       setTextLikeField("tweet-text", seed);
@@ -3502,11 +3654,12 @@ const autoCollapseInspectorIfIdle = ({ persist = false } = {}) => {
     return;
   }
   const current = normalizeUiLayoutState(state.uiLayout);
-  if (current.rightInspectorCollapsed) {
+  if (current.rightRailCollapsed) {
     return;
   }
   state.uiLayout = {
     ...current,
+    rightRailCollapsed: true,
     rightInspectorCollapsed: true,
   };
   state.utilityRail = {
@@ -3543,7 +3696,8 @@ const initIdeWorkspace = () => {
   $("ide-toggle-left")?.addEventListener("click", () => {
     state.uiLayout = {
       ...normalizeUiLayoutState(state.uiLayout),
-      leftSidebarCollapsed: !Boolean(state.uiLayout.leftSidebarCollapsed),
+      leftDrawerCollapsed: !Boolean(state.uiLayout.leftDrawerCollapsed),
+      leftSidebarCollapsed: !Boolean(state.uiLayout.leftDrawerCollapsed),
     };
     applyUiLayoutState({ persist: true });
   });
@@ -3551,7 +3705,8 @@ const initIdeWorkspace = () => {
   $("ide-toggle-right")?.addEventListener("click", () => {
     state.uiLayout = {
       ...normalizeUiLayoutState(state.uiLayout),
-      rightInspectorCollapsed: !Boolean(state.uiLayout.rightInspectorCollapsed),
+      rightRailCollapsed: !Boolean(state.uiLayout.rightRailCollapsed),
+      rightInspectorCollapsed: !Boolean(state.uiLayout.rightRailCollapsed),
     };
     applyUiLayoutState({ persist: true });
   });
@@ -3559,7 +3714,8 @@ const initIdeWorkspace = () => {
   $("ide-toggle-bottom")?.addEventListener("click", () => {
     state.uiLayout = {
       ...normalizeUiLayoutState(state.uiLayout),
-      bottomRailCollapsed: !Boolean(state.uiLayout.bottomRailCollapsed),
+      bottomDrawerCollapsed: !Boolean(state.uiLayout.bottomDrawerCollapsed),
+      bottomRailCollapsed: !Boolean(state.uiLayout.bottomDrawerCollapsed),
     };
     applyUiLayoutState({ persist: true });
   });
@@ -3616,31 +3772,67 @@ const renderCoworkConversations = () => {
     return;
   }
   node.innerHTML = "";
-  const rows = state.history.slice(0, 14);
+  const rows = state.history.slice(0, 14).map((item, index) => {
+    const date = new Date(item.at || Date.now());
+    const ageMinutes = Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
+    const ageLabel = ageMinutes < 60
+      ? `${ageMinutes || 1}m ago`
+      : ageMinutes < 1440
+        ? `${Math.round(ageMinutes / 60)}h ago`
+        : `${Math.round(ageMinutes / 1440)}d ago`;
+    return {
+      title: deriveBlueprintThreadTitle(item) || (index === 0 ? "default" : "session"),
+      age: ageLabel,
+    };
+  });
   if (!rows.length) {
-    const empty = document.createElement("div");
-    empty.className = "history-item";
-    empty.textContent = "No operations yet.";
-    node.appendChild(empty);
-    return;
+    rows.push({ title: "default", age: "now" });
   }
   rows.forEach((item) => {
     const wrap = document.createElement("div");
     wrap.className = "history-item";
     const title = document.createElement("strong");
-    title.textContent = item.endpoint || "event";
+    title.textContent = item.title;
     wrap.appendChild(title);
     const timeNode = document.createElement("small");
-    timeNode.textContent = new Date(item.at).toLocaleString();
+    timeNode.textContent = item.age;
     wrap.appendChild(timeNode);
-    const meta = document.createElement("code");
-    meta.textContent = toJSON({
-      ok: item.ok,
-      args: item.args || {},
-    });
-    wrap.appendChild(meta);
     node.appendChild(wrap);
   });
+};
+
+const setCoworkMode = (mode, { applyDefaults = true } = {}) => {
+  const normalized = mode === "power" ? "power" : "simple";
+  state.uiLayout = {
+    ...normalizeUiLayoutState(state.uiLayout),
+    chatMode: normalized,
+  };
+  writeUiLayoutState();
+  writeChatModeState(normalized);
+  document.querySelectorAll("[data-cowork-mode]").forEach((button) => {
+    button.classList.toggle("active", button.getAttribute("data-cowork-mode") === normalized);
+  });
+  if (!applyDefaults) {
+    return;
+  }
+  if ($("cowork-auto-plan")) {
+    $("cowork-auto-plan").checked = normalized === "power";
+  }
+  if ($("cowork-start-task")) {
+    $("cowork-start-task").checked = true;
+  }
+};
+
+const syncRuntimeLoopUi = () => {
+  const pauseBtn = $("ide-runtime-pause");
+  const runningPill = document.querySelector(".ide-pill-running");
+  if (pauseBtn instanceof HTMLButtonElement) {
+    pauseBtn.textContent = refreshLoopPaused ? "Resume" : "II";
+    pauseBtn.title = refreshLoopPaused ? "Resume refresh loop" : "Pause refresh loop";
+  }
+  if (runningPill instanceof HTMLElement) {
+    runningPill.textContent = refreshLoopPaused ? "paused" : "running";
+  }
 };
 
 const ellipsizeText = (value, maxLength = 66) => {
@@ -4464,11 +4656,11 @@ const executeDesktopCommand = async (commandId, payload = {}) => {
     window.focus();
     const route = String(commandPayload.route || "").trim();
     if (route === "approvals") {
-      setIdeActivityTab("approvals", { persist: true });
+      setIdeActivityTab("tools", { persist: true });
       setIdeDockPane("left", "approval-queue-panel", { persist: true });
       focusDashboardField("approval-id");
     } else if (route === "tasks") {
-      setIdeActivityTab("cowork", { persist: true });
+      setIdeActivityTab("chat", { persist: true });
       setIdeDockPane("left", "task-board-panel", { persist: true });
       const taskId = String(commandPayload.taskId || "").trim();
       if ($("task-id") instanceof HTMLInputElement && taskId) {
@@ -6795,6 +6987,89 @@ const bindDashboardEvents = () => {
     openContextPicker(contextPayloadFromSelection("toolbar-send-context"));
   });
 
+  $("ide-runtime-pause")?.addEventListener("click", () => {
+    refreshLoopPaused = !refreshLoopPaused;
+    syncRuntimeLoopUi();
+  });
+
+  $("ide-runtime-restart")?.addEventListener("click", async () => {
+    setIdeActionFeedback("Refreshing runtime systems...", "neutral");
+    await Promise.allSettled([
+      refreshProviderStatus(),
+      refreshIntegrations(),
+      refreshCoworkState(),
+      refreshTasks(),
+      refreshApprovals(),
+      refreshTaskLogTail(),
+      refreshLivekitStatus(),
+    ]);
+    setIdeActionFeedback("Runtime systems refreshed.", "success");
+  });
+
+  document.querySelectorAll("[data-cowork-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setCoworkMode(String(button.getAttribute("data-cowork-mode") || "simple"), { applyDefaults: true });
+    });
+  });
+  setCoworkMode(readChatModeState(), { applyDefaults: true });
+  syncRuntimeLoopUi();
+
+  $("ide-view-refresh")?.addEventListener("click", async () => {
+    await runIdeWorkspaceAction("refresh-status");
+    renderIdeInspectorSummaries();
+  });
+
+  document.querySelectorAll("[data-utility-proxy]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const targetId = String(button.getAttribute("data-utility-proxy") || "").trim();
+      if (!targetId) {
+        return;
+      }
+      const target = $(targetId);
+      if (target instanceof HTMLElement && typeof target.click === "function") {
+        target.click();
+        return;
+      }
+      setIdeActionFeedback(`Missing control: ${targetId}`, "warn");
+    });
+  });
+
+  $("tools-preset-run")?.addEventListener("click", () => {
+    const preset = String($("tools-preset-select")?.value || "").trim();
+    if (!preset) {
+      setText("tools-drawer-output", "Pick a preset first.");
+      return;
+    }
+    setIdeActivityTab("tools", { persist: true });
+    const filterInput = $("endpoint-filter");
+    if (filterInput instanceof HTMLInputElement) {
+      filterInput.value = preset;
+      filterInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    renderEndpointOptions();
+    const select = $("endpoint-select");
+    if (!(select instanceof HTMLSelectElement) || !select.options.length) {
+      setText("tools-drawer-output", `No endpoint found for preset "${preset}".`);
+      return;
+    }
+    const preferred =
+      [...select.options].find((option) => option.value === preset)
+      || [...select.options].find((option) => option.value.includes(preset))
+      || select.options[0];
+    if (!preferred) {
+      setText("tools-drawer-output", `No endpoint found for preset "${preset}".`);
+      return;
+    }
+    select.value = preferred.value;
+    renderEndpointArgs();
+    setText("tools-drawer-output", `Running endpoint preset: ${preferred.value}`);
+    $("endpoint-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+
+  $("tools-preset-open-live")?.addEventListener("click", () => {
+    $("watch-expand-live")?.click();
+  });
+
   $("utility-rail-toggle")?.addEventListener("click", () => {
     state.utilityRail = {
       ...state.utilityRail,
@@ -6802,6 +7077,7 @@ const bindDashboardEvents = () => {
     };
     state.uiLayout = {
       ...normalizeUiLayoutState(state.uiLayout),
+      rightRailCollapsed: state.utilityRail.collapsed,
       rightInspectorCollapsed: state.utilityRail.collapsed,
     };
     writeUtilityRailState();
@@ -8092,6 +8368,101 @@ const bindDashboardEvents = () => {
     }
   });
 
+  const openLiveViewerModal = () => {
+    const modal = $("live-viewer-modal");
+    if (!(modal instanceof HTMLElement)) {
+      return;
+    }
+    modal.classList.remove("hidden");
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+  };
+
+  const closeLiveViewerModal = () => {
+    const modal = $("live-viewer-modal");
+    if (!(modal instanceof HTMLElement)) {
+      return;
+    }
+    modal.classList.remove("open");
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
+  };
+
+  $("watch-expand-live")?.addEventListener("click", () => {
+    openLiveViewerModal();
+  });
+  $("live-viewer-close")?.addEventListener("click", () => {
+    closeLiveViewerModal();
+  });
+  $("live-viewer-modal")?.addEventListener("click", (event) => {
+    if (event.target === $("live-viewer-modal")) {
+      closeLiveViewerModal();
+    }
+  });
+
+  $("integrations-center-refresh")?.addEventListener("click", async () => {
+    $("integrations-refresh")?.click();
+    await refreshCoworkState();
+    renderIdeInspectorSummaries();
+  });
+  $("integrations-center-bridge")?.addEventListener("click", async () => {
+    $("integration-bridge-refresh")?.click();
+    await refreshCoworkState();
+    renderIdeInspectorSummaries();
+  });
+  $("integrations-center-subs")?.addEventListener("click", async () => {
+    $("integration-subs-refresh")?.click();
+    await refreshCoworkState();
+    renderIdeInspectorSummaries();
+  });
+  $("integrations-center-livekit")?.addEventListener("click", async () => {
+    $("livekit-refresh")?.click();
+    await refreshCoworkState();
+    renderIdeInspectorSummaries();
+  });
+  $("integrations-center-open-antigravity")?.addEventListener("click", () => {
+    $("integration-open-antigravity")?.click();
+  });
+  $("integrations-center-open-chrome")?.addEventListener("click", () => {
+    $("integration-open-chrome")?.click();
+  });
+  $("integrations-center-open-live-viewer")?.addEventListener("click", () => {
+    openLiveViewerModal();
+  });
+
+  $("settings-center-provider")?.addEventListener("click", () => {
+    $("provider-refresh")?.click();
+  });
+  $("settings-center-heartbeat")?.addEventListener("click", () => {
+    $("heartbeat-refresh")?.click();
+  });
+  $("settings-center-heartbeat-run")?.addEventListener("click", () => {
+    $("heartbeat-run-now")?.click();
+  });
+  $("settings-center-onboarding")?.addEventListener("click", () => {
+    $("open-onboarding-btn")?.click();
+  });
+
+  $("advanced-open-dev-workbench")?.addEventListener("click", () => {
+    setIdeDockPane("main", "dev-workbench-panel", { persist: true });
+  });
+  $("advanced-open-xalgo")?.addEventListener("click", () => {
+    setIdeDockPane("main", "x-algo-panel", { persist: true });
+  });
+  $("advanced-refresh-approvals")?.addEventListener("click", () => {
+    $("approvals-refresh")?.click();
+  });
+  $("advanced-refresh-tasks")?.addEventListener("click", () => {
+    $("tasks-refresh")?.click();
+  });
+  $("advanced-open-terminal-sessions")?.addEventListener("click", () => {
+    $("dev-terminal-refresh")?.click();
+  });
+  $("advanced-open-integration-actions")?.addEventListener("click", () => {
+    setIdeActivityTab("integrations", { persist: true });
+    setIdeDockPane("left", "runtime-controls-panel", { persist: true });
+  });
+
   $("watch-session-id")?.addEventListener("change", () => {
     const value = ($("watch-session-id")?.value || "").trim();
     syncWatchSessionSelection(value);
@@ -8787,7 +9158,10 @@ const boot = async () => {
   state.approvalAutoApproveRules = readApprovalAutoApproveRules();
   state.coworkView = readCoworkViewState();
   state.ideDock = readIdeDockState();
-  state.uiLayout = readUiLayoutState();
+  state.uiLayout = {
+    ...readUiLayoutState(),
+    chatMode: readChatModeState(),
+  };
   if (window.podDesktop?.getDesktopCapabilities) {
     try {
       const caps = await window.podDesktop.getDesktopCapabilities();
@@ -8860,6 +9234,9 @@ const boot = async () => {
     setObserverIframeSession(initialWatchSession);
   }
   setInterval(async () => {
+    if (refreshLoopPaused) {
+      return;
+    }
     try {
       await Promise.all([
         refreshTasks(),
